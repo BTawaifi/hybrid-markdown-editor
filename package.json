@@ -1,12 +1,12 @@
 {
   "name": "hybrid-markdown-editor",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Obsidian-like hybrid markdown editor (per-line renderer + inline editing) for React.",
   "license": "MIT",
-  "author": "",
+  "author": "Boutros Tawaifi",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/BTawaifi/hybrid-markdown-editor"
   },
   "keywords": [
     "markdown",
@@ -15,15 +15,15 @@
     "obsidian",
     "hybrid"
   ],
-  "main": "dist/index.cjs.js",
-  "module": "dist/index.esm.js",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "sideEffects": false,
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup --dts-resolve",
     "dev": "tsup --watch",
     "clean": "rimraf dist",
     "prepublishOnly": "npm run build"
