@@ -1,19 +1,26 @@
-## Hybrid Markdown Editor
+# Hybrid Markdown Editor
 
-Obsidian‑like hybrid markdown editor for React. It renders each line as formatted preview, and turns a single line into an input when you focus it. Supports lists, headings, blockquotes, and basic bold syntax while typing.
+A lightweight, Obsidian-style markdown editor for **React**.
+Each line is rendered as formatted markdown by default, and turns into an editable `<textarea>` only when you focus it.
+Supports **headings, lists, blockquotes, and bold syntax** while typing.
 
-### Install
+---
+
+## Installation
 
 ```bash
 npm i hybrid-markdown-editor
 ```
 
-Peer dependencies:
-- react >= 18
-- react-dom >= 18
-- react-textarea-autosize >= 8
+### Peer dependencies
 
-### Quick start
+* `react >= 18`
+* `react-dom >= 18`
+* `react-textarea-autosize >= 8`
+
+---
+
+## Quick Start
 
 ```tsx
 import { useState } from 'react';
@@ -21,6 +28,7 @@ import { HybridMarkdownEditor } from 'hybrid-markdown-editor';
 
 export default function App() {
   const [value, setValue] = useState('# Title\n- item');
+
   return (
     <HybridMarkdownEditor
       value={value}
@@ -32,82 +40,62 @@ export default function App() {
 }
 ```
 
-### Features
+---
 
-- Inline editing per line with automatic textarea sizing
-- List continuation on Enter (configurable)
-- Smart Backspace for removing list markers/indent
-- Multi-line selection and deletion across rendered lines
-- Bold syntax `**like this**` shown while typing
-- Extensible hooks for keydown, paste, and custom line prefix/suffix rendering
+## Key Features
 
-### Concepts and terminology
+* Per-line editing with auto-resizing textareas
+* Continue lists automatically when pressing **Enter** (optional)
+* Smart **Backspace** (removes list markers/indentation correctly)
+* Multi-line selection and deletion
+* Inline **bold syntax** (`**like this**`) visible while typing
+* Extensible via hooks for **keydown**, **paste**, and custom rendering
 
-- **root**: The outer wrapper element of the editor. Attach layout or container styles here.
-- **content**: The inner container that holds the list of lines. It is a vertical stack of lines.
-- **line**: A single row in the editor corresponding to one line of the markdown value. When a line is active, it renders a `<textarea>`; otherwise it renders formatted text.
-- **active line**: The line currently focused/being edited. It toggles between preview and input. Use `classNames.activeLine` to visually highlight it.
-- **line types**: The semantic type of a line derived from its markdown prefix. Supported types: `h1`, `h2`, `h3`, `h4`, `li` (list item, including tasks and ordered lists), `blockquote`, `p` (plain paragraph).
+---
 
-What this means in practice: the editor is just a list of lines. Clicking a line turns it into a textarea for that line only. The rest remain rendered.
+## How It Works
 
-### DOM structure (for styling and testing)
+The editor is essentially a **list of lines**:
+
+* **Line** = one row of markdown text
+* **Active line** = the line currently focused and editable (`<textarea>`)
+* All other lines remain in read-only rendered mode
+
+### Line types supported:
+
+* `h1, h2, h3, h4` (headings)
+* `li` (list item, including tasks and ordered lists)
+* `blockquote`
+* `p` (paragraph)
+
+---
+
+## DOM Structure
 
 ```html
-<div class="{className} {classNames.root}"> <!-- root -->
-  <div class="{classNames.content}">       <!-- content -->
-    <div data-line-index="0" class="{line classes}">
-      <!-- When not active: -->
+<div class="editor-root"> <!-- root -->
+  <div class="editor-content"> <!-- content -->
+    <div data-line-index="0" class="line h1">
+      <!-- Not active -->
       <div data-role="line-content"></div>
-      <!-- When active: -->
+      <!-- Active -->
       <textarea></textarea>
     </div>
-    <div data-line-index="1" class="{line classes}">
-      ...
-    </div>
-    <!-- one container per line -->
+    <div data-line-index="1" class="line li">...</div>
   </div>
 </div>
 ```
 
-Useful selectors you can rely on:
-- `[data-line-index="N"]`: select a specific line container by index
-- `[data-role="line-content"]`: the read-only rendered content of a line
+**Useful selectors:**
 
-### Styling hooks explained
+* `[data-line-index="N"]` → specific line
+* `[data-role="line-content"]` → rendered line preview
 
-You can provide classes for different parts via the `classNames` prop:
+---
 
-- `root`: applied to the outermost wrapper.
-- `content`: applied to the inner container holding all lines.
-- `line`: either a string or a function. If a function, it receives `{ index, type, isActive }` and should return a class string to apply to that specific line.
-- `activeLine`: applied in addition to `line` when the line is focused/being edited.
-- `lineTypes`: an object to apply classes per semantic type, e.g. `{ h1: 'big', li: 'bullet' }`.
+## Styling
 
-Order of application for each line is: `lineTypes[type]` + `activeLine(if active)` + `line`.
-
-### Props
-
-- value: string (controlled value)
-- onChange?: (value: string) => void (fires on every edit)
-- onDebouncedChange?: (value: string) => void (fires after debounce)
-- debounceMs?: number (default 1000)
-- readOnly?: boolean
-- className?: string (root wrapper)
-- classNames?: object
-  - root?: string
-  - content?: string
-  - line?: string | (ctx: { index; type; isActive }) => string
-  - activeLine?: string
-  - lineTypes?: Partial<Record<'h1'|'h2'|'h3'|'h4'|'li'|'blockquote'|'p', string>>
-- renderLine?: ({ index, line, type, isActive, defaultContent }) => ReactNode
-- options?: object
-  - indentSize?: number (default 2)
-  - continueListsOnEnter?: boolean (default true)
-  - pasteSplitLines?: boolean (default true)
-- extensions?: EditorExtension[] (see below)
-
-### Styling example
+You can pass class names via `classNames`:
 
 ```tsx
 <HybridMarkdownEditor
@@ -129,7 +117,42 @@ Order of application for each line is: `lineTypes[type]` + `activeLine(if active
 />
 ```
 
-### Custom line rendering
+**Order of applied classes per line:**
+`lineTypes[type]` → `activeLine` (if focused) → `line`
+
+---
+
+## Props
+
+| Prop                | Type          | Description                                 |
+| ------------------- | ------------- | ------------------------------------------- |
+| `value`             | `string`      | Controlled markdown value                   |
+| `onChange`          | `(v) => void` | Fires on every edit                         |
+| `onDebouncedChange` | `(v) => void` | Fires after debounce delay                  |
+| `debounceMs`        | `number`      | Delay for debounced change (default `1000`) |
+| `readOnly`          | `boolean`     | Makes editor read-only                      |
+| `className`         | `string`      | Extra root class                            |
+| `classNames`        | `object`      | Styling hooks (see above)                   |
+| `renderLine`        | `function`    | Custom renderer for each line               |
+| `options`           | `object`      | Behavior options (below)                    |
+
+### Behavior Options
+
+```tsx
+<HybridMarkdownEditor
+  value={value}
+  onChange={setValue}
+  options={{
+    indentSize: 4,              // default 2
+    continueListsOnEnter: false, // default true
+    pasteSplitLines: true,       // default true
+  }}
+/>
+```
+
+---
+
+## Custom Rendering Example
 
 ```tsx
 <HybridMarkdownEditor
@@ -143,28 +166,18 @@ Order of application for each line is: `lineTypes[type]` + `activeLine(if active
 />
 ```
 
-### Behavior options
+---
 
-```tsx
-<HybridMarkdownEditor
-  value={value}
-  onChange={setValue}
-  options={{
-    indentSize: 4,
-    continueListsOnEnter: false,
-    pasteSplitLines: true,
-  }}
-/>
-```
+## Extensions API
 
-### Extensions API
+Extensions let you add custom behavior for **keyboard events, paste, or custom line decorations**.
 
 ```ts
 type EditorExtension = {
-  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>, api: ExtensionApi) => boolean | void;
-  onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>, api: ExtensionApi) => boolean | void;
-  renderLinePrefix?: (ctx: { index: number; line: string; type: LineType; isActive: boolean }) => React.ReactNode;
-  renderLineSuffix?: (ctx: { index: number; line: string; type: LineType; isActive: boolean }) => React.ReactNode;
+  onKeyDown?: (e, api) => boolean | void;
+  onPaste?: (e, api) => boolean | void;
+  renderLinePrefix?: (ctx) => React.ReactNode;
+  renderLineSuffix?: (ctx) => React.ReactNode;
 }
 
 type ExtensionApi = {
@@ -179,29 +192,36 @@ type ExtensionApi = {
 }
 ```
 
-Example extension
+---
+
+## Example Extension: Toggle TODOs
 
 ```tsx
-const todoExtension: EditorExtension = {
+const todoExtension = {
   onKeyDown: (e, api) => {
     if (e.ctrlKey && e.key.toLowerCase() === 't') {
       const idx = api.getActiveLineIndex();
       if (idx == null) return;
+
       const line = api.getLine(idx) ?? '';
       const toggled = line.replace(/^(\s*[-*]\s)\[ \]/, '$1[x]');
       api.setLine(idx, toggled);
+
       e.preventDefault();
       return true;
     }
   },
-  renderLineSuffix: ({ line, type }) => (
-    type === 'li' && /\[x\]/i.test(line) ? <span style={{ marginLeft: 8, color: 'green' }}>done</span> : null
-  )
-}
+  renderLineSuffix: ({ line, type }) =>
+    type === 'li' && /\[x\]/i.test(line)
+      ? <span style={{ marginLeft: 8, color: 'green' }}>done</span>
+      : null,
+};
 
 <HybridMarkdownEditor value={value} onChange={setValue} extensions={[todoExtension]} />
 ```
 
-### License
+---
+
+## License
 
 MIT
