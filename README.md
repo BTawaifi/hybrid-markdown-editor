@@ -1,19 +1,19 @@
-# hybrid-markdown-editor
+## Hybrid Markdown Editor
 
-Obsidian-like hybrid markdown editor (per-line renderer + inline editing) for React.
+Obsidian‑like hybrid markdown editor for React. It renders each line as formatted preview, and turns a single line into an input when you focus it. Supports lists, headings, blockquotes, and basic bold syntax while typing.
 
-## Install
+### Install
 
-```
+```bash
 npm i hybrid-markdown-editor
 ```
 
-Peer deps:
+Peer dependencies:
 - react >= 18
 - react-dom >= 18
 - react-textarea-autosize >= 8
 
-## Usage
+### Quick start
 
 ```tsx
 import { useState } from 'react';
@@ -32,34 +32,67 @@ export default function App() {
 }
 ```
 
-## Customization
+### Features
 
-- classNames: style root, content, active lines, and per-type classes
-- renderLine: override line rendering while receiving defaultContent
-- options: indentSize, continueListsOnEnter, pasteSplitLines
-- extensions: hook into keydown, paste, and render prefixes/suffixes
+- Inline editing per line with automatic textarea sizing
+- List continuation on Enter (configurable)
+- Smart Backspace for removing list markers/indent
+- Multi-line selection and deletion across rendered lines
+- Bold syntax `**like this**` shown while typing
+- Extensible hooks for keydown, paste, and custom line prefix/suffix rendering
 
-```tsx
-<HybridMarkdownEditor
-  value={value}
-  onChange={setValue}
-  classNames={{
-    root: 'h-full',
-    content: 'px-6',
-    activeLine: 'bg-zinc-100 rounded',
-    lineTypes: { li: 'pl-6 relative' },
-  }}
-  options={{ indentSize: 4, continueListsOnEnter: true }}
-/>
+### Concepts and terminology
+
+- **root**: The outer wrapper element of the editor. Attach layout or container styles here.
+- **content**: The inner container that holds the list of lines. It is a vertical stack of lines.
+- **line**: A single row in the editor corresponding to one line of the markdown value. When a line is active, it renders a `<textarea>`; otherwise it renders formatted text.
+- **active line**: The line currently focused/being edited. It toggles between preview and input. Use `classNames.activeLine` to visually highlight it.
+- **line types**: The semantic type of a line derived from its markdown prefix. Supported types: `h1`, `h2`, `h3`, `h4`, `li` (list item, including tasks and ordered lists), `blockquote`, `p` (plain paragraph).
+
+What this means in practice: the editor is just a list of lines. Clicking a line turns it into a textarea for that line only. The rest remain rendered.
+
+### DOM structure (for styling and testing)
+
+```html
+<div class="{className} {classNames.root}"> <!-- root -->
+  <div class="{classNames.content}">       <!-- content -->
+    <div data-line-index="0" class="{line classes}">
+      <!-- When not active: -->
+      <div data-role="line-content"></div>
+      <!-- When active: -->
+      <textarea></textarea>
+    </div>
+    <div data-line-index="1" class="{line classes}">
+      ...
+    </div>
+    <!-- one container per line -->
+  </div>
+</div>
 ```
+
+Useful selectors you can rely on:
+- `[data-line-index="N"]`: select a specific line container by index
+- `[data-role="line-content"]`: the read-only rendered content of a line
+
+### Styling hooks explained
+
+You can provide classes for different parts via the `classNames` prop:
+
+- `root`: applied to the outermost wrapper.
+- `content`: applied to the inner container holding all lines.
+- `line`: either a string or a function. If a function, it receives `{ index, type, isActive }` and should return a class string to apply to that specific line.
+- `activeLine`: applied in addition to `line` when the line is focused/being edited.
+- `lineTypes`: an object to apply classes per semantic type, e.g. `{ h1: 'big', li: 'bullet' }`.
+
+Order of application for each line is: `lineTypes[type]` + `activeLine(if active)` + `line`.
 
 ### Props
 
 - value: string (controlled value)
-- onChange?: (value: string) => void (called on every edit)
-- onDebouncedChange?: (value: string) => void (called after debounce)
+- onChange?: (value: string) => void (fires on every edit)
+- onDebouncedChange?: (value: string) => void (fires after debounce)
 - debounceMs?: number (default 1000)
-- readOnly?: boolean (disables editing behaviors)
+- readOnly?: boolean
 - className?: string (root wrapper)
 - classNames?: object
   - root?: string
@@ -74,24 +107,24 @@ export default function App() {
   - pasteSplitLines?: boolean (default true)
 - extensions?: EditorExtension[] (see below)
 
-### Styling with classNames
+### Styling example
 
 ```tsx
 <HybridMarkdownEditor
   value={value}
   onChange={setValue}
   classNames={{
-    root: 'h-full',
-    content: 'prose dark:prose-invert max-w-none px-6 py-4',
-    activeLine: 'bg-muted/30 rounded',
+    root: 'my-editor-root',
+    content: 'my-editor-content',
+    activeLine: 'my-editor-active-line',
     lineTypes: {
-      h1: 'text-4xl font-bold mt-6 mb-4',
-      h2: 'text-3xl font-semibold mt-5 mb-3',
-      li: 'pl-6 relative',
-      blockquote: 'border-l-4 pl-4 italic text-muted-foreground',
-      p: 'text-base',
+      h1: 'heading-1',
+      h2: 'heading-2',
+      li: 'list-item',
+      blockquote: 'blockquote',
+      p: 'paragraph',
     },
-    line: ({ index, type, isActive }) => type === 'li' ? 'before:content-["•"] before:absolute before:left-0' : ''
+    line: ({ type }) => (type === 'li' ? 'list-item-custom' : ''),
   }}
 />
 ```
@@ -103,7 +136,7 @@ export default function App() {
   value={value}
   onChange={setValue}
   renderLine={({ defaultContent, type }) => (
-    <div className={type === 'blockquote' ? 'text-muted-foreground' : ''}>
+    <div style={type === 'blockquote' ? { opacity: 0.8 } : undefined}>
       {defaultContent}
     </div>
   )}
@@ -162,15 +195,13 @@ const todoExtension: EditorExtension = {
     }
   },
   renderLineSuffix: ({ line, type }) => (
-    type === 'li' && /\[x\]/i.test(line) ? <span className="ml-2 text-green-600">done</span> : null
+    type === 'li' && /\[x\]/i.test(line) ? <span style={{ marginLeft: 8, color: 'green' }}>done</span> : null
   )
 }
 
 <HybridMarkdownEditor value={value} onChange={setValue} extensions={[todoExtension]} />
 ```
 
-## License
+### License
 
 MIT
-
-
