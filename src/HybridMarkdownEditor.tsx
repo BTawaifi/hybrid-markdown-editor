@@ -82,8 +82,10 @@ const getMarkdownType = (line: string): LineType => {
   return "p";
 };
 
+const BOLD_REGEX = /(\*\*[^*]+\*\*)/g;
+
 const parseBold = (text: string): (string | React.ReactElement)[] => {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  const parts = text.split(BOLD_REGEX);
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={idx}>{part.slice(2, -2)}</strong>;
