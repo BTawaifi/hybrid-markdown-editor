@@ -3,8 +3,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 
-type ListKind = "ul" | "ol" | "task" | "blockquote" | null;
-type ListMeta = {
+export type ListKind = "ul" | "ol" | "task" | "blockquote" | null;
+export type ListMeta = {
   kind: ListKind;
   indent: string;
   currentMarker: string;
@@ -94,7 +94,7 @@ const parseBold = (text: string): (string | React.ReactElement)[] => {
   });
 };
 
-const getListMeta = (line: string): ListMeta => {
+export const getListMeta = (line: string): ListMeta => {
   const indentMatch = line.match(/^(\s*)/);
   const indent = indentMatch ? indentMatch[1] : "";
 
