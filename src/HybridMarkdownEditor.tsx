@@ -162,6 +162,19 @@ const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): num
   return line.length;
 };
 
+const getFallbackCaretPosition = (
+  container: HTMLElement,
+  clientX: number
+): number => {
+  const rect = container.getBoundingClientRect();
+  const textLen = container.textContent?.length ?? 0;
+  if (rect.width <= 1 || textLen === 0) return textLen;
+  if (clientX <= rect.left + 4) return 0;
+  if (clientX >= rect.right - 4) return textLen;
+  const ratio = (clientX - rect.left) / rect.width;
+  return Math.max(0, Math.min(textLen, Math.round(ratio * textLen)));
+};
+
 const getClickDisplayOffset = (
   container: HTMLElement,
   clientX: number,
@@ -186,13 +199,7 @@ const getClickDisplayOffset = (
     }
   } catch { /* Ignore errors from experimental caret position APIs; fallback logic below handles missing caretNode. */ }
   if (!caretNode) {
-    const rect = container.getBoundingClientRect();
-    const textLen = container.textContent?.length ?? 0;
-    if (rect.width <= 1 || textLen === 0) return textLen;
-    if (clientX <= rect.left + 4) return 0;
-    if (clientX >= rect.right - 4) return textLen;
-    const ratio = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(textLen, Math.round(ratio * textLen)));
+    return getFallbackCaretPosition(container, clientX);
   }
   try {
     const r = document.createRange();
@@ -200,13 +207,7 @@ const getClickDisplayOffset = (
     r.setEnd(caretNode, caretOffset);
     return r.toString().length;
   } catch { // Range operations may fail if nodes are no longer in the DOM or selection is invalid; fallback to coordinate-based estimation.
-    const rect = container.getBoundingClientRect();
-    const textLen = container.textContent?.length ?? 0;
-    if (rect.width <= 1 || textLen === 0) return textLen;
-    if (clientX <= rect.left + 4) return 0;
-    if (clientX >= rect.right - 4) return textLen;
-    const ratio = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(textLen, Math.round(ratio * textLen)));
+    return getFallbackCaretPosition(container, clientX);
   }
 };
 
