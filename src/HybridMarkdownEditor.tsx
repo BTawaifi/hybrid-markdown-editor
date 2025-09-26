@@ -12,7 +12,7 @@ type ListMeta = {
   number?: number;
 };
 
-type LineType = "h1" | "h2" | "h3" | "h4" | "li" | "blockquote" | "p";
+export type LineType = "h1" | "h2" | "h3" | "h4" | "li" | "blockquote" | "p";
 
 export type EditorExtension = {
   onKeyDown?: (
@@ -70,7 +70,7 @@ export interface HybridMarkdownEditorProps {
 const cx = (...classes: Array<string | false | undefined>) =>
   classes.filter(Boolean).join(" ");
 
-const getMarkdownType = (line: string): LineType => {
+export const getMarkdownType = (line: string): LineType => {
   if (/^#{1}\s/.test(line)) return "h1";
   if (/^#{2}\s/.test(line)) return "h2";
   if (/^#{3}\s/.test(line)) return "h3";
