@@ -136,7 +136,7 @@ const getRemovedPrefixLength = (line: string): number => {
   return match ? match[0].length : 0;
 };
 
-const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
+export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
   const prefix = getRemovedPrefixLength(line);
   const content = line.slice(prefix);
   let i = 0;
