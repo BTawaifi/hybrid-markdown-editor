@@ -632,7 +632,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
       const meta = getListMeta(line);
       if (meta.kind) {
         e.preventDefault();
-        const indentSize = options?.indentSize ?? 2;
+        const rawIndentSize = options?.indentSize ?? 2;
+        const indentSize = Math.max(1, Math.min(32, Math.floor(Number.isFinite(rawIndentSize) ? rawIndentSize : 2)));
         if (e.shiftKey) {
           setLines((prev) => {
             const next = [...prev];
