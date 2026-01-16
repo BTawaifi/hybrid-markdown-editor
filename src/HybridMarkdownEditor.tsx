@@ -96,7 +96,7 @@ const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d
 const BOLD_REGEX = /(\*\*[^*]+\*\*)/g;
 const BOLD_STRIP_REGEX = /\*\*/g;
 
-const parseBold = (text: string): (string | React.ReactElement)[] => {
+export const parseBold = (text: string): (string | React.ReactElement)[] => {
   const parts = text.split(BOLD_REGEX);
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**")) {
