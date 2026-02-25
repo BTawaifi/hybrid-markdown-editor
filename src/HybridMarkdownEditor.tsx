@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 
 type ListKind = "ul" | "ol" | "task" | "blockquote" | null;
@@ -84,16 +84,19 @@ const getMarkdownType = (line: string): LineType => {
   if (H2_REGEX.test(line)) return "h2";
   if (H3_REGEX.test(line)) return "h3";
   if (H4_REGEX.test(line)) return "h4";
-  if(LI_TASK_REGEX.test(line)) return "li";
-  if(LI_UL_REGEX.test(line)) return "li";
-  if(LI_OL_REGEX.test(line)) return "li";
-  if(BLOCKQUOTE_REGEX.test(line)) return "blockquote";
+  if (LI_TASK_REGEX.test(line)) return "li";
+  if (LI_UL_REGEX.test(line)) return "li";
+  if (LI_OL_REGEX.test(line)) return "li";
+  if (BLOCKQUOTE_REGEX.test(line)) return "blockquote";
   return "p";
 };
+const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d+\.\s|\s*>\s)/;
+
 
 const BOLD_REGEX = /(\*\*[^*]+\*\*)/g;
+const BOLD_STRIP_REGEX = /\*\*/g;
 
-const parseBold = (text: string): (string | React.ReactElement)[] => {
+export const parseBold = (text: string): (string | React.ReactElement)[] => {
   const parts = text.split(BOLD_REGEX);
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**")) {
@@ -103,25 +106,32 @@ const parseBold = (text: string): (string | React.ReactElement)[] => {
   });
 };
 
+const INDENT_REGEX = /^(\s*)/;
+const LIST_TASK_MATCH_REGEX = /^(\s*)([-*])\s\[[ xX]\]\s/;
+const TASK_CHECKED_REGEX = /\[[xX]\]/;
+const LIST_UL_MATCH_REGEX = /^(\s*)([-*])\s/;
+const LIST_OL_MATCH_REGEX = /^(\s*)(\d+)\.\s/;
+const LIST_BQ_MATCH_REGEX = /^(\s*)>\s/;
+
 const getListMeta = (line: string): ListMeta => {
-  const indentMatch = line.match(/^(\s*)/);
+  const indentMatch = line.match(INDENT_REGEX);
   const indent = indentMatch ? indentMatch[1] : "";
 
-  const taskMatch = line.match(/^(\s*)([-*])\s\[[ xX]\]\s/);
+  const taskMatch = line.match(LIST_TASK_MATCH_REGEX);
   if (taskMatch) {
-    const isChecked = /\[[xX]\]/.test(line);
+    const isChecked = TASK_CHECKED_REGEX.test(line);
     const currentMarker = `${taskMatch[1]}${taskMatch[2]} [${isChecked ? "x" : " "}] `;
     const nextMarker = `${taskMatch[1]}${taskMatch[2]} [ ] `;
     return { kind: "task", indent, currentMarker, nextMarker };
   }
 
-  const ulMatch = line.match(/^(\s*)([-*])\s/);
+  const ulMatch = line.match(LIST_UL_MATCH_REGEX);
   if (ulMatch) {
     const marker = `${ulMatch[1]}${ulMatch[2]} `;
     return { kind: "ul", indent, currentMarker: marker, nextMarker: marker };
   }
 
-  const olMatch = line.match(/^(\s*)(\d+)\.\s/);
+  const olMatch = line.match(LIST_OL_MATCH_REGEX);
   if (olMatch) {
     const number = parseInt(olMatch[2], 10);
     const currentMarker = `${olMatch[1]}${number}. `;
@@ -129,7 +139,7 @@ const getListMeta = (line: string): ListMeta => {
     return { kind: "ol", indent, currentMarker, nextMarker, number };
   }
 
-  const bqMatch = line.match(/^(\s*)>\s/);
+  const bqMatch = line.match(LIST_BQ_MATCH_REGEX);
   if (bqMatch) {
     const marker = `${bqMatch[1]}> `;
     return { kind: "blockquote", indent, currentMarker: marker, nextMarker: marker };
@@ -139,20 +149,11 @@ const getListMeta = (line: string): ListMeta => {
 };
 
 const getRemovedPrefixLength = (line: string): number => {
-  const h = line.match(/^#{1,4}\s/);
-  if (h) return h[0].length;
-  const task = line.match(/^\s*[-*]\s\[[ xX]\]\s/);
-  if (task) return task[0].length;
-  const ul = line.match(/^\s*[-*]\s/);
-  if (ul) return ul[0].length;
-  const ol = line.match(/^\s*\d+\.\s/);
-  if (ol) return ol[0].length;
-  const bq = line.match(/^\s*>\s/);
-  if (bq) return bq[0].length;
-  return 0;
+  const match = line.match(MARKDOWN_PREFIX_REGEX);
+  return match ? match[0].length : 0;
 };
 
-const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
+export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
   const prefix = getRemovedPrefixLength(line);
   const content = line.slice(prefix);
   let i = 0;
@@ -169,6 +170,16 @@ const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): num
     displayCount += 1;
   }
   return line.length;
+};
+
+const getFallbackDisplayOffset = (container: HTMLElement, clientX: number): number => {
+  const rect = container.getBoundingClientRect();
+  const textLen = container.textContent?.length ?? 0;
+  if (rect.width <= 1 || textLen === 0) return textLen;
+  if (clientX <= rect.left + 4) return 0;
+  if (clientX >= rect.right - 4) return textLen;
+  const ratio = (clientX - rect.left) / rect.width;
+  return Math.max(0, Math.min(textLen, Math.round(ratio * textLen)));
 };
 
 const getClickDisplayOffset = (
@@ -195,13 +206,7 @@ const getClickDisplayOffset = (
     }
   } catch { /* Ignore errors from experimental caret position APIs; fallback logic below handles missing caretNode. */ }
   if (!caretNode) {
-    const rect = container.getBoundingClientRect();
-    const textLen = container.textContent?.length ?? 0;
-    if (rect.width <= 1 || textLen === 0) return textLen;
-    if (clientX <= rect.left + 4) return 0;
-    if (clientX >= rect.right - 4) return textLen;
-    const ratio = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(textLen, Math.round(ratio * textLen)));
+    return getFallbackDisplayOffset(container, clientX);
   }
   try {
     const r = document.createRange();
@@ -209,13 +214,7 @@ const getClickDisplayOffset = (
     r.setEnd(caretNode, caretOffset);
     return r.toString().length;
   } catch { // Range operations may fail if nodes are no longer in the DOM or selection is invalid; fallback to coordinate-based estimation.
-    const rect = container.getBoundingClientRect();
-    const textLen = container.textContent?.length ?? 0;
-    if (rect.width <= 1 || textLen === 0) return textLen;
-    if (clientX <= rect.left + 4) return 0;
-    if (clientX >= rect.right - 4) return textLen;
-    const ratio = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(textLen, Math.round(ratio * textLen)));
+    return getFallbackDisplayOffset(container, clientX);
   }
 };
 
@@ -231,7 +230,8 @@ const EditorLine: React.FC<{
   isSelectingRef: React.MutableRefObject<boolean>;
   classNames?: HybridMarkdownEditorProps["classNames"];
   renderLine?: HybridMarkdownEditorProps["renderLine"];
-  extensions?: EditorExtension[];
+  extensionsPrefix?: EditorExtension[];
+  extensionsSuffix?: EditorExtension[];
 }> = ({
   index,
   line,
@@ -244,7 +244,8 @@ const EditorLine: React.FC<{
   isSelectingRef,
   classNames,
   renderLine,
-  extensions,
+  extensionsPrefix,
+  extensionsSuffix,
 }) => {
   const type = getMarkdownType(line);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -292,12 +293,7 @@ const EditorLine: React.FC<{
       {line.trim() === ""
         ? "\u00A0"
         : parseBold(
-            line
-              .replace(/^#+\s/, "")
-              .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
-              .replace(/^\s*[-*]\s/, "")
-              .replace(/^\s*\d+\.\s/, "")
-              .replace(/^\s*>\s/, "")
+            line.replace(MARKDOWN_PREFIX_REGEX, "")
           )}
     </>
   );
@@ -334,7 +330,6 @@ const EditorLine: React.FC<{
             ev.stopPropagation();
           }}
           autoFocus
-          className={cx()}
           style={{
             width: "100%",
             resize: "none",
@@ -349,7 +344,6 @@ const EditorLine: React.FC<{
       ) : (
         <div
           data-role="line-content"
-          className={cx()}
           style={{ userSelect: "text", paddingLeft: type === "li" ? 20 : 0 }}
           onMouseUp={(ev) => {
             const sel = window.getSelection();
@@ -364,11 +358,11 @@ const EditorLine: React.FC<{
             }
           }}
         >
-          {extensions?.map((ext) => ext.renderLinePrefix?.({ index, line, type, isActive }) || null)}
+          {extensionsPrefix?.map((ext) => ext.renderLinePrefix?.({ index, line, type, isActive }) || null)}
           {renderLine
             ? renderLine({ index, line, type, isActive, defaultContent: defaultRendered })
             : defaultRendered}
-          {extensions?.map((ext) => ext.renderLineSuffix?.({ index, line, type, isActive }) || null)}
+          {extensionsSuffix?.map((ext) => ext.renderLineSuffix?.({ index, line, type, isActive }) || null)}
         </div>
       )}
     </div>
@@ -396,6 +390,23 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const draggingFromTextareaRef = useRef<boolean>(false);
   const bridgingSelectionRef = useRef<boolean>(false);
+
+  const extensionsWithKeyDown = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.onKeyDown),
+    [extensions]
+  );
+  const extensionsWithPaste = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.onPaste),
+    [extensions]
+  );
+  const extensionsWithPrefix = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.renderLinePrefix),
+    [extensions]
+  );
+  const extensionsWithSuffix = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.renderLineSuffix),
+    [extensions]
+  );
 
   useEffect(() => {
     setLines((value || "").split("\n"));
@@ -448,12 +459,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
 
   const getDisplayContentLength = (line: string): number => {
     const stripped = line
-      .replace(/^#{1,4}\s/, "")
-      .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
-      .replace(/^\s*[-*]\s/, "")
-      .replace(/^\s*\d+\.\s/, "")
-      .replace(/^\s*>\s/, "")
-      .replace(/\*\*/g, "");
+      .replace(MARKDOWN_PREFIX_REGEX, "")
+      .replace(BOLD_STRIP_REGEX, "");
     return stripped.length;
   };
 
@@ -508,6 +515,18 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     sel.addRange(range);
   };
 
+
+  const createExtensionApi = (): ExtensionApi => ({
+    getValue: () => lines.join("\n"),
+    setValue: (next: string) => setLines(next.split("\n")),
+    getLine: (i: number) => lines[i],
+    setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
+    insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
+    deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
+    getActiveLineIndex: () => activeLineIndex,
+    setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
+  });
+
   const handleLineChange = (idx: number, value: string) => {
     setLines((prev) => {
       const next = [...prev];
@@ -522,18 +541,12 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     e: React.ClipboardEvent<HTMLTextAreaElement>,
     idx: number
   ) => {
-    for (const ext of (extensions || [])) {
-      const handled = ext.onPaste?.(e, {
-        getValue: () => lines.join("\n"),
-        setValue: (next: string) => setLines(next.split("\n")),
-        getLine: (i: number) => lines[i],
-        setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
-        insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
-        deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
-        getActiveLineIndex: () => activeLineIndex,
-        setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
-      } as ExtensionApi);
-      if (handled) return;
+    if (extensionsWithPaste.length > 0) {
+      const api = createExtensionApi();
+      for (const ext of extensionsWithPaste) {
+        const handled = ext.onPaste?.(e, api);
+        if (handled) return;
+      }
     }
     if ((window.getSelection()?.toString() || "").includes("\n")) {
       return;
@@ -567,18 +580,12 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     e: React.KeyboardEvent<HTMLTextAreaElement>,
     idx: number
   ) => {
-    for (const ext of (extensions || [])) {
-      const handled = ext.onKeyDown?.(e, {
-        getValue: () => lines.join("\n"),
-        setValue: (next: string) => setLines(next.split("\n")),
-        getLine: (i: number) => lines[i],
-        setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
-        insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
-        deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
-        getActiveLineIndex: () => activeLineIndex,
-        setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
-      } as ExtensionApi);
-      if (handled) return;
+    if (extensionsWithKeyDown.length > 0) {
+      const api = createExtensionApi();
+      for (const ext of extensionsWithKeyDown) {
+        const handled = ext.onKeyDown?.(e, api);
+        if (handled) return;
+      }
     }
     if (isSelectingRef.current) return;
     const textarea = e.currentTarget;
@@ -663,7 +670,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
       const meta = getListMeta(line);
       if (meta.kind) {
         e.preventDefault();
-        const indentSize = options?.indentSize ?? 2;
+        const rawIndentSize = options?.indentSize ?? 2;
+        const indentSize = Math.max(1, Math.min(32, Math.floor(Number.isFinite(rawIndentSize) ? rawIndentSize : 2)));
         if (e.shiftKey) {
           setLines((prev) => {
             const next = [...prev];
@@ -896,7 +904,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
               isSelectingRef={isSelectingRef}
               classNames={classNames}
               renderLine={renderLine}
-              extensions={extensions}
+              extensionsPrefix={extensionsWithPrefix}
+              extensionsSuffix={extensionsWithSuffix}
             />
           ))}
         </div>
