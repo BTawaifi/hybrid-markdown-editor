@@ -81,6 +81,8 @@ const getMarkdownType = (line: string): LineType => {
   if(/^\s*>\s/.test(line)) return "blockquote";
   return "p";
 };
+const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d+\.\s|\s*>\s)/;
+
 
 const BOLD_REGEX = /(\*\*[^*]+\*\*)/g;
 
@@ -130,17 +132,8 @@ const getListMeta = (line: string): ListMeta => {
 };
 
 const getRemovedPrefixLength = (line: string): number => {
-  const h = line.match(/^#{1,4}\s/);
-  if (h) return h[0].length;
-  const task = line.match(/^\s*[-*]\s\[[ xX]\]\s/);
-  if (task) return task[0].length;
-  const ul = line.match(/^\s*[-*]\s/);
-  if (ul) return ul[0].length;
-  const ol = line.match(/^\s*\d+\.\s/);
-  if (ol) return ol[0].length;
-  const bq = line.match(/^\s*>\s/);
-  if (bq) return bq[0].length;
-  return 0;
+  const match = line.match(MARKDOWN_PREFIX_REGEX);
+  return match ? match[0].length : 0;
 };
 
 const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
@@ -283,12 +276,7 @@ const EditorLine: React.FC<{
       {line.trim() === ""
         ? "\u00A0"
         : parseBold(
-            line
-              .replace(/^#+\s/, "")
-              .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
-              .replace(/^\s*[-*]\s/, "")
-              .replace(/^\s*\d+\.\s/, "")
-              .replace(/^\s*>\s/, "")
+            line.replace(MARKDOWN_PREFIX_REGEX, "")
           )}
     </>
   );
@@ -439,11 +427,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
 
   const getDisplayContentLength = (line: string): number => {
     const stripped = line
-      .replace(/^#{1,4}\s/, "")
-      .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
-      .replace(/^\s*[-*]\s/, "")
-      .replace(/^\s*\d+\.\s/, "")
-      .replace(/^\s*>\s/, "")
+      .replace(MARKDOWN_PREFIX_REGEX, "")
       .replace(/\*\*/g, "");
     return stripped.length;
   };
