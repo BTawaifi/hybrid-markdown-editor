@@ -499,6 +499,18 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     sel.addRange(range);
   };
 
+
+  const createExtensionApi = (): ExtensionApi => ({
+    getValue: () => lines.join("\n"),
+    setValue: (next: string) => setLines(next.split("\n")),
+    getLine: (i: number) => lines[i],
+    setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
+    insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
+    deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
+    getActiveLineIndex: () => activeLineIndex,
+    setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
+  });
+
   const handleLineChange = (idx: number, value: string) => {
     setLines((prev) => {
       const next = [...prev];
@@ -514,16 +526,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     idx: number
   ) => {
     for (const ext of (extensions || [])) {
-      const handled = ext.onPaste?.(e, {
-        getValue: () => lines.join("\n"),
-        setValue: (next: string) => setLines(next.split("\n")),
-        getLine: (i: number) => lines[i],
-        setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
-        insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
-        deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
-        getActiveLineIndex: () => activeLineIndex,
-        setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
-      } as ExtensionApi);
+      const handled = ext.onPaste?.(e, createExtensionApi());
       if (handled) return;
     }
     if ((window.getSelection()?.toString() || "").includes("\n")) {
@@ -559,16 +562,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     idx: number
   ) => {
     for (const ext of (extensions || [])) {
-      const handled = ext.onKeyDown?.(e, {
-        getValue: () => lines.join("\n"),
-        setValue: (next: string) => setLines(next.split("\n")),
-        getLine: (i: number) => lines[i],
-        setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
-        insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
-        deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
-        getActiveLineIndex: () => activeLineIndex,
-        setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
-      } as ExtensionApi);
+      const handled = ext.onKeyDown?.(e, createExtensionApi());
       if (handled) return;
     }
     if (isSelectingRef.current) return;
