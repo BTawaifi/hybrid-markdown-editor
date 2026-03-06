@@ -67,6 +67,12 @@ export interface HybridMarkdownEditorProps {
   extensions?: EditorExtension[];
 }
 
+const PREFIX_H_REGEX = /^#+\s/;
+const PREFIX_TASK_REGEX = /^\s*[-*]\s\[[ xX]\]\s/;
+const PREFIX_UL_REGEX = /^\s*[-*]\s/;
+const PREFIX_OL_REGEX = /^\s*\d+\.\s/;
+const PREFIX_BQ_REGEX = /^\s*>\s/;
+
 const cx = (...classes: Array<string | false | undefined>) =>
   classes.filter(Boolean).join(" ");
 
@@ -284,11 +290,11 @@ const EditorLine: React.FC<{
         ? "\u00A0"
         : parseBold(
             line
-              .replace(/^#+\s/, "")
-              .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
-              .replace(/^\s*[-*]\s/, "")
-              .replace(/^\s*\d+\.\s/, "")
-              .replace(/^\s*>\s/, "")
+              .replace(PREFIX_H_REGEX, "")
+              .replace(PREFIX_TASK_REGEX, "")
+              .replace(PREFIX_UL_REGEX, "")
+              .replace(PREFIX_OL_REGEX, "")
+              .replace(PREFIX_BQ_REGEX, "")
           )}
     </>
   );
@@ -440,10 +446,10 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   const getDisplayContentLength = (line: string): number => {
     const stripped = line
       .replace(/^#{1,4}\s/, "")
-      .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
-      .replace(/^\s*[-*]\s/, "")
-      .replace(/^\s*\d+\.\s/, "")
-      .replace(/^\s*>\s/, "")
+      .replace(PREFIX_TASK_REGEX, "")
+      .replace(PREFIX_UL_REGEX, "")
+      .replace(PREFIX_OL_REGEX, "")
+      .replace(PREFIX_BQ_REGEX, "")
       .replace(/\*\*/g, "");
     return stripped.length;
   };
