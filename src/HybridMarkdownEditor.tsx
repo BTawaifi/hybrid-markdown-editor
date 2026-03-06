@@ -155,7 +155,7 @@ const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): num
   return line.length;
 };
 
-const getClickDisplayOffset = (
+export const getClickDisplayOffset = (
   container: HTMLElement,
   clientX: number,
   clientY: number
