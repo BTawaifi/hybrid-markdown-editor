@@ -23,6 +23,7 @@
     "dist"
   ],
   "scripts": {
+    "test": "vitest run",
     "build": "tsup --dts-resolve",
     "dev": "tsup --watch",
     "clean": "rimraf dist",
@@ -41,6 +42,7 @@
     "react-textarea-autosize": "^8.5.9",
     "rimraf": "^5.0.0",
     "tsup": "^7.2.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.0.18"
   }
 }
