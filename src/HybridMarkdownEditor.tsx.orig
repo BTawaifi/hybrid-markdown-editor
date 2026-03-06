@@ -70,28 +70,17 @@ export interface HybridMarkdownEditorProps {
 const cx = (...classes: Array<string | false | undefined>) =>
   classes.filter(Boolean).join(" ");
 
-const H1_REGEX = /^#{1}\s/;
-const H2_REGEX = /^#{2}\s/;
-const H3_REGEX = /^#{3}\s/;
-const H4_REGEX = /^#{4}\s/;
-const LI_TASK_REGEX = /^\s*[-*]\s\[[ xX]\]\s/;
-const LI_UL_REGEX = /^\s*[-*]\s/;
-const LI_OL_REGEX = /^\s*\d+\.\s/;
-const BLOCKQUOTE_REGEX = /^\s*>\s/;
-
 const getMarkdownType = (line: string): LineType => {
-  if (H1_REGEX.test(line)) return "h1";
-  if (H2_REGEX.test(line)) return "h2";
-  if (H3_REGEX.test(line)) return "h3";
-  if (H4_REGEX.test(line)) return "h4";
-  if(LI_TASK_REGEX.test(line)) return "li";
-  if(LI_UL_REGEX.test(line)) return "li";
-  if(LI_OL_REGEX.test(line)) return "li";
-  if(BLOCKQUOTE_REGEX.test(line)) return "blockquote";
+  if (/^#{1}\s/.test(line)) return "h1";
+  if (/^#{2}\s/.test(line)) return "h2";
+  if (/^#{3}\s/.test(line)) return "h3";
+  if (/^#{4}\s/.test(line)) return "h4";
+  if(/^\s*[-*]\s\[[ xX]\]\s/.test(line)) return "li";
+  if(/^\s*[-*]\s/.test(line)) return "li";
+  if(/^\s*\d+\.\s/.test(line)) return "li";
+  if(/^\s*>\s/.test(line)) return "blockquote";
   return "p";
 };
-const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d+\.\s|\s*>\s)/;
-
 
 const BOLD_REGEX = /(\*\*[^*]+\*\*)/g;
 
@@ -141,8 +130,17 @@ const getListMeta = (line: string): ListMeta => {
 };
 
 const getRemovedPrefixLength = (line: string): number => {
-  const match = line.match(MARKDOWN_PREFIX_REGEX);
-  return match ? match[0].length : 0;
+  const h = line.match(/^#{1,4}\s/);
+  if (h) return h[0].length;
+  const task = line.match(/^\s*[-*]\s\[[ xX]\]\s/);
+  if (task) return task[0].length;
+  const ul = line.match(/^\s*[-*]\s/);
+  if (ul) return ul[0].length;
+  const ol = line.match(/^\s*\d+\.\s/);
+  if (ol) return ol[0].length;
+  const bq = line.match(/^\s*>\s/);
+  if (bq) return bq[0].length;
+  return 0;
 };
 
 const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
@@ -285,7 +283,12 @@ const EditorLine: React.FC<{
       {line.trim() === ""
         ? "\u00A0"
         : parseBold(
-            line.replace(MARKDOWN_PREFIX_REGEX, "")
+            line
+              .replace(/^#+\s/, "")
+              .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
+              .replace(/^\s*[-*]\s/, "")
+              .replace(/^\s*\d+\.\s/, "")
+              .replace(/^\s*>\s/, "")
           )}
     </>
   );
@@ -436,7 +439,11 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
 
   const getDisplayContentLength = (line: string): number => {
     const stripped = line
-      .replace(MARKDOWN_PREFIX_REGEX, "")
+      .replace(/^#{1,4}\s/, "")
+      .replace(/^\s*[-*]\s\[[ xX]\]\s/, "")
+      .replace(/^\s*[-*]\s/, "")
+      .replace(/^\s*\d+\.\s/, "")
+      .replace(/^\s*>\s/, "")
       .replace(/\*\*/g, "");
     return stripped.length;
   };
@@ -492,18 +499,6 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     sel.addRange(range);
   };
 
-
-  const createExtensionApi = (): ExtensionApi => ({
-    getValue: () => lines.join("\n"),
-    setValue: (next: string) => setLines(next.split("\n")),
-    getLine: (i: number) => lines[i],
-    setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
-    insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
-    deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
-    getActiveLineIndex: () => activeLineIndex,
-    setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
-  });
-
   const handleLineChange = (idx: number, value: string) => {
     setLines((prev) => {
       const next = [...prev];
@@ -519,7 +514,16 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     idx: number
   ) => {
     for (const ext of (extensions || [])) {
-      const handled = ext.onPaste?.(e, createExtensionApi());
+      const handled = ext.onPaste?.(e, {
+        getValue: () => lines.join("\n"),
+        setValue: (next: string) => setLines(next.split("\n")),
+        getLine: (i: number) => lines[i],
+        setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
+        insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
+        deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
+        getActiveLineIndex: () => activeLineIndex,
+        setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
+      } as ExtensionApi);
       if (handled) return;
     }
     if ((window.getSelection()?.toString() || "").includes("\n")) {
@@ -555,7 +559,16 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     idx: number
   ) => {
     for (const ext of (extensions || [])) {
-      const handled = ext.onKeyDown?.(e, createExtensionApi());
+      const handled = ext.onKeyDown?.(e, {
+        getValue: () => lines.join("\n"),
+        setValue: (next: string) => setLines(next.split("\n")),
+        getLine: (i: number) => lines[i],
+        setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
+        insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
+        deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
+        getActiveLineIndex: () => activeLineIndex,
+        setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
+      } as ExtensionApi);
       if (handled) return;
     }
     if (isSelectingRef.current) return;
