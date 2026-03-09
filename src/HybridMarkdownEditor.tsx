@@ -177,7 +177,7 @@ const getClickDisplayOffset = (
         caretOffset = pos.offset;
       }
     }
-  } catch { /* Ignore errors from experimental caret position APIs; fallback logic below handles missing caretNode. */ }
+  } catch (err) { console.debug(err); /* Ignore errors from experimental caret position APIs; fallback logic below handles missing caretNode. */ }
   if (!caretNode) {
     const rect = container.getBoundingClientRect();
     const textLen = container.textContent?.length ?? 0;
@@ -192,7 +192,7 @@ const getClickDisplayOffset = (
     r.selectNodeContents(container);
     r.setEnd(caretNode, caretOffset);
     return r.toString().length;
-  } catch { // Range operations may fail if nodes are no longer in the DOM or selection is invalid; fallback to coordinate-based estimation.
+  } catch (err) { console.debug(err); // Range operations may fail if nodes are no longer in the DOM or selection is invalid; fallback to coordinate-based estimation.
     const rect = container.getBoundingClientRect();
     const textLen = container.textContent?.length ?? 0;
     if (rect.width <= 1 || textLen === 0) return textLen;
@@ -420,7 +420,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
       r.selectNodeContents(contentEl);
       r.setEnd(node, nodeOffset);
       return r.toString().length;
-    } catch { // If range calculation fails, default to 0 offset.
+    } catch (err) { console.debug(err); // If range calculation fails, default to 0 offset.
       return 0;
     }
   };
@@ -793,7 +793,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
                   range.setEnd(sel.anchorNode, sel.anchorOffset);
                   const offset = range.toString().length;
                   selectionAnchorRef.current = { index: idx, offset };
-                } catch { // If range calculation fails, default to start of line.
+                } catch (err) { console.debug(err); // If range calculation fails, default to start of line.
                   selectionAnchorRef.current = { index: idx, offset: 0 };
                 }
               } else {
