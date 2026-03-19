@@ -534,7 +534,11 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
       return next;
     });
     setIsDirty(true);
-    onChange?.(lines.map((l, i) => (i === idx ? value : l)).join("\n"));
+    if (onChange) {
+      const nextLines = [...lines];
+      nextLines[idx] = value;
+      onChange(nextLines.join("\n"));
+    }
   };
 
   const handlePaste = (
