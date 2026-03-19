@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 
 type ListKind = "ul" | "ol" | "task" | "blockquote" | null;
@@ -70,21 +70,31 @@ export interface HybridMarkdownEditorProps {
 const cx = (...classes: Array<string | false | undefined>) =>
   classes.filter(Boolean).join(" ");
 
+const H1_REGEX = /^#{1}\s/;
+const H2_REGEX = /^#{2}\s/;
+const H3_REGEX = /^#{3}\s/;
+const H4_REGEX = /^#{4}\s/;
+const LI_TASK_REGEX = /^\s*[-*]\s\[[ xX]\]\s/;
+const LI_UL_REGEX = /^\s*[-*]\s/;
+const LI_OL_REGEX = /^\s*\d+\.\s/;
+const BLOCKQUOTE_REGEX = /^\s*>\s/;
+
 const getMarkdownType = (line: string): LineType => {
-  if (/^#{1}\s/.test(line)) return "h1";
-  if (/^#{2}\s/.test(line)) return "h2";
-  if (/^#{3}\s/.test(line)) return "h3";
-  if (/^#{4}\s/.test(line)) return "h4";
-  if(/^\s*[-*]\s\[[ xX]\]\s/.test(line)) return "li";
-  if(/^\s*[-*]\s/.test(line)) return "li";
-  if(/^\s*\d+\.\s/.test(line)) return "li";
-  if(/^\s*>\s/.test(line)) return "blockquote";
+  if (H1_REGEX.test(line)) return "h1";
+  if (H2_REGEX.test(line)) return "h2";
+  if (H3_REGEX.test(line)) return "h3";
+  if (H4_REGEX.test(line)) return "h4";
+  if (LI_TASK_REGEX.test(line)) return "li";
+  if (LI_UL_REGEX.test(line)) return "li";
+  if (LI_OL_REGEX.test(line)) return "li";
+  if (BLOCKQUOTE_REGEX.test(line)) return "blockquote";
   return "p";
 };
 const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d+\.\s|\s*>\s)/;
 
 
 const BOLD_REGEX = /(\*\*[^*]+\*\*)/g;
+const BOLD_STRIP_REGEX = /\*\*/g;
 
 const parseBold = (text: string): (string | React.ReactElement)[] => {
   const parts = text.split(BOLD_REGEX);
@@ -96,25 +106,32 @@ const parseBold = (text: string): (string | React.ReactElement)[] => {
   });
 };
 
+const INDENT_REGEX = /^(\s*)/;
+const LIST_TASK_MATCH_REGEX = /^(\s*)([-*])\s\[[ xX]\]\s/;
+const TASK_CHECKED_REGEX = /\[[xX]\]/;
+const LIST_UL_MATCH_REGEX = /^(\s*)([-*])\s/;
+const LIST_OL_MATCH_REGEX = /^(\s*)(\d+)\.\s/;
+const LIST_BQ_MATCH_REGEX = /^(\s*)>\s/;
+
 const getListMeta = (line: string): ListMeta => {
-  const indentMatch = line.match(/^(\s*)/);
+  const indentMatch = line.match(INDENT_REGEX);
   const indent = indentMatch ? indentMatch[1] : "";
 
-  const taskMatch = line.match(/^(\s*)([-*])\s\[[ xX]\]\s/);
+  const taskMatch = line.match(LIST_TASK_MATCH_REGEX);
   if (taskMatch) {
-    const isChecked = /\[[xX]\]/.test(line);
+    const isChecked = TASK_CHECKED_REGEX.test(line);
     const currentMarker = `${taskMatch[1]}${taskMatch[2]} [${isChecked ? "x" : " "}] `;
     const nextMarker = `${taskMatch[1]}${taskMatch[2]} [ ] `;
     return { kind: "task", indent, currentMarker, nextMarker };
   }
 
-  const ulMatch = line.match(/^(\s*)([-*])\s/);
+  const ulMatch = line.match(LIST_UL_MATCH_REGEX);
   if (ulMatch) {
     const marker = `${ulMatch[1]}${ulMatch[2]} `;
     return { kind: "ul", indent, currentMarker: marker, nextMarker: marker };
   }
 
-  const olMatch = line.match(/^(\s*)(\d+)\.\s/);
+  const olMatch = line.match(LIST_OL_MATCH_REGEX);
   if (olMatch) {
     const number = parseInt(olMatch[2], 10);
     const currentMarker = `${olMatch[1]}${number}. `;
@@ -122,7 +139,7 @@ const getListMeta = (line: string): ListMeta => {
     return { kind: "ol", indent, currentMarker, nextMarker, number };
   }
 
-  const bqMatch = line.match(/^(\s*)>\s/);
+  const bqMatch = line.match(LIST_BQ_MATCH_REGEX);
   if (bqMatch) {
     const marker = `${bqMatch[1]}> `;
     return { kind: "blockquote", indent, currentMarker: marker, nextMarker: marker };
@@ -213,7 +230,8 @@ const EditorLine: React.FC<{
   isSelectingRef: React.MutableRefObject<boolean>;
   classNames?: HybridMarkdownEditorProps["classNames"];
   renderLine?: HybridMarkdownEditorProps["renderLine"];
-  extensions?: EditorExtension[];
+  extensionsPrefix?: EditorExtension[];
+  extensionsSuffix?: EditorExtension[];
 }> = ({
   index,
   line,
@@ -226,7 +244,8 @@ const EditorLine: React.FC<{
   isSelectingRef,
   classNames,
   renderLine,
-  extensions,
+  extensionsPrefix,
+  extensionsSuffix,
 }) => {
   const type = getMarkdownType(line);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -339,11 +358,11 @@ const EditorLine: React.FC<{
             }
           }}
         >
-          {extensions?.map((ext) => ext.renderLinePrefix?.({ index, line, type, isActive }) || null)}
+          {extensionsPrefix?.map((ext) => ext.renderLinePrefix?.({ index, line, type, isActive }) || null)}
           {renderLine
             ? renderLine({ index, line, type, isActive, defaultContent: defaultRendered })
             : defaultRendered}
-          {extensions?.map((ext) => ext.renderLineSuffix?.({ index, line, type, isActive }) || null)}
+          {extensionsSuffix?.map((ext) => ext.renderLineSuffix?.({ index, line, type, isActive }) || null)}
         </div>
       )}
     </div>
@@ -371,6 +390,23 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const draggingFromTextareaRef = useRef<boolean>(false);
   const bridgingSelectionRef = useRef<boolean>(false);
+
+  const extensionsWithKeyDown = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.onKeyDown),
+    [extensions]
+  );
+  const extensionsWithPaste = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.onPaste),
+    [extensions]
+  );
+  const extensionsWithPrefix = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.renderLinePrefix),
+    [extensions]
+  );
+  const extensionsWithSuffix = useMemo(
+    () => (extensions || []).filter((ext) => !!ext.renderLineSuffix),
+    [extensions]
+  );
 
   useEffect(() => {
     setLines((value || "").split("\n"));
@@ -424,7 +460,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   const getDisplayContentLength = (line: string): number => {
     const stripped = line
       .replace(MARKDOWN_PREFIX_REGEX, "")
-      .replace(/\*\*/g, "");
+      .replace(BOLD_STRIP_REGEX, "");
     return stripped.length;
   };
 
@@ -505,9 +541,12 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     e: React.ClipboardEvent<HTMLTextAreaElement>,
     idx: number
   ) => {
-    for (const ext of (extensions || [])) {
-      const handled = ext.onPaste?.(e, createExtensionApi());
-      if (handled) return;
+    if (extensionsWithPaste.length > 0) {
+      const api = createExtensionApi();
+      for (const ext of extensionsWithPaste) {
+        const handled = ext.onPaste?.(e, api);
+        if (handled) return;
+      }
     }
     if ((window.getSelection()?.toString() || "").includes("\n")) {
       return;
@@ -541,9 +580,12 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     e: React.KeyboardEvent<HTMLTextAreaElement>,
     idx: number
   ) => {
-    for (const ext of (extensions || [])) {
-      const handled = ext.onKeyDown?.(e, createExtensionApi());
-      if (handled) return;
+    if (extensionsWithKeyDown.length > 0) {
+      const api = createExtensionApi();
+      for (const ext of extensionsWithKeyDown) {
+        const handled = ext.onKeyDown?.(e, api);
+        if (handled) return;
+      }
     }
     if (isSelectingRef.current) return;
     const textarea = e.currentTarget;
@@ -862,7 +904,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
               isSelectingRef={isSelectingRef}
               classNames={classNames}
               renderLine={renderLine}
-              extensions={extensions}
+              extensionsPrefix={extensionsWithPrefix}
+              extensionsSuffix={extensionsWithSuffix}
             />
           ))}
         </div>
