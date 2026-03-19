@@ -311,7 +311,6 @@ const EditorLine: React.FC<{
             ev.stopPropagation();
           }}
           autoFocus
-          className={cx()}
           style={{
             width: "100%",
             resize: "none",
@@ -326,7 +325,6 @@ const EditorLine: React.FC<{
       ) : (
         <div
           data-role="line-content"
-          className={cx()}
           style={{ userSelect: "text", paddingLeft: type === "li" ? 20 : 0 }}
           onMouseUp={(ev) => {
             const sel = window.getSelection();
