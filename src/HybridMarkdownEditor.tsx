@@ -12,7 +12,7 @@ type ListMeta = {
   number?: number;
 };
 
-type LineType = "h1" | "h2" | "h3" | "h4" | "li" | "blockquote" | "p";
+export type LineType = "h1" | "h2" | "h3" | "h4" | "li" | "blockquote" | "p";
 
 export type EditorExtension = {
   onKeyDown?: (
@@ -79,7 +79,7 @@ const LI_UL_REGEX = /^\s*[-*]\s/;
 const LI_OL_REGEX = /^\s*\d+\.\s/;
 const BLOCKQUOTE_REGEX = /^\s*>\s/;
 
-const getMarkdownType = (line: string): LineType => {
+export const getMarkdownType = (line: string): LineType => {
   if (H1_REGEX.test(line)) return "h1";
   if (H2_REGEX.test(line)) return "h2";
   if (H3_REGEX.test(line)) return "h3";
@@ -113,7 +113,7 @@ const LIST_UL_MATCH_REGEX = /^(\s*)([-*])\s/;
 const LIST_OL_MATCH_REGEX = /^(\s*)(\d+)\.\s/;
 const LIST_BQ_MATCH_REGEX = /^(\s*)>\s/;
 
-const getListMeta = (line: string): ListMeta => {
+export const getListMeta = (line: string): ListMeta => {
   const indentMatch = line.match(INDENT_REGEX);
   const indent = indentMatch ? indentMatch[1] : "";
 
@@ -182,7 +182,7 @@ const getFallbackDisplayOffset = (container: HTMLElement, clientX: number): numb
   return Math.max(0, Math.min(textLen, Math.round(ratio * textLen)));
 };
 
-const getClickDisplayOffset = (
+export const getClickDisplayOffset = (
   container: HTMLElement,
   clientX: number,
   clientY: number
