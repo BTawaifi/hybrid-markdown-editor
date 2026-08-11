@@ -1,23 +1,14 @@
 # Hybrid Markdown Editor
 
-A lightweight, Obsidian-style markdown editor for **React**.
-Each line is rendered as formatted markdown by default and becomes an editable `<textarea>` only while focused.
-
-The package is designed as a controlled React component with extension hooks rather than as a full document platform.
-
-## Installation
+A lightweight, Obsidian-style Markdown editor for React. Inactive lines render as Markdown-like preview content; the active line becomes a normal auto-resizing textarea.
 
 ```bash
 npm i hybrid-markdown-editor
 ```
 
-### Peer dependencies
+## Core contract
 
-- `react >= 18`
-- `react-dom >= 18`
-- `react-textarea-autosize >= 8`
-
-## Quick start
+`HybridMarkdownEditor` is a controlled component. **Every document mutation**—typing, Enter, list continuation, Backspace merges, indentation, multi-line paste, rendered selection deletion, and extension API edits—flows through the same change pipeline and calls `onChange(nextMarkdown)`.
 
 ```tsx
 import { useState } from 'react';
@@ -30,161 +21,93 @@ export default function App() {
     <HybridMarkdownEditor
       value={value}
       onChange={setValue}
-      onDebouncedChange={(v) => console.log('save', v)}
+      onDebouncedChange={(next) => console.log('save', next)}
       debounceMs={1000}
     />
   );
 }
 ```
 
-## Key features
+Controlled value echoes from the parent do not cancel the pending local debounce. A genuinely different external value replaces the local document and cancels that stale pending debounce.
+
+## Features
 
 - Per-line editing with auto-resizing textareas
-- Automatic list continuation on **Enter**
-- Smart **Backspace** behavior for list markers and indentation
-- Multi-line selection and deletion
-- Inline bold syntax while typing
-- Controlled value / change API
-- Hooks for keyboard, paste, and custom rendering behavior
-- Styling hooks without forcing a design system
+- Controlled `value` / `onChange` behavior across all edit paths
+- Debounced change callback for persistence/autosave
+- Strict `readOnly` mode
+- Automatic unordered, ordered, task-list, and blockquote continuation on Enter
+- Selection-aware Enter and multi-line paste
+- Smart Backspace line joining and marker removal
+- List indentation/dedentation
+- Multi-line rendered selection deletion
+- Inline `**bold**` preview with source-aware caret mapping
+- Distinct preview markers for unordered, ordered, checked, and unchecked task items
+- Extension hooks for keyboard, paste, prefix, and suffix behavior
+- Class and style hooks for root/content/line/preview/textarea/marker surfaces
+- CJS + ESM builds with TypeScript declarations
 
-## Architecture
-
-The editor uses a deliberately simple model:
+## Editing model
 
 ```text
 controlled markdown string
         │
         ▼
-parsed lines
-├── line 0 → rendered preview
-├── line 1 → active textarea
-├── line 2 → rendered preview
+internal line projection
+├── inactive line → preview + source mapping
+├── active line   → textarea
 └── ...
         │
         ▼
-onChange(nextMarkdown)
+central commit pipeline
+├── update internal projection
+├── onChange(nextMarkdown)
+└── schedule onDebouncedChange(nextMarkdown)
 ```
 
-Only the active line switches into editing mode. The remaining lines stay rendered.
+The line projection is not an independent persistence model. External application state remains authoritative.
 
-That avoids the complexity of maintaining a second independent document model while still providing an editor that feels closer to rendered Markdown than a plain textarea.
+## Lists and blockquotes
 
-### Core state model
+The preview distinguishes list kinds instead of flattening everything to a bullet:
 
-- **Document value:** owned by the consumer as a normal Markdown string.
-- **Line representation:** derived from that value.
-- **Active line:** the line currently receiving keyboard/caret interaction.
-- **Extensions:** receive a small editing API rather than direct ownership of internal component state.
-
-The controlled-component boundary is intentional: persistence, collaboration, history, autosave, and application state remain the responsibility of the host application.
-
-## Performance considerations
-
-Typing is the hottest path in an editor, so operations inside line-change handlers matter more than work performed during occasional configuration changes.
-
-A previous implementation rebuilt changed line arrays through a full `.map()` pass on every edit. That path was replaced with a shallow copy plus direct index assignment before joining the document. A benchmark over large line arrays measured roughly a 31% improvement for that operation.
-
-The broader rule is to optimize measured interaction paths without adding caches whose invalidation cost would make the editor harder to reason about.
-
-## Design tradeoffs
-
-### Line-oriented rendering
-
-**Benefit:** inactive content can look rendered while the active line remains a normal textarea with familiar browser editing semantics.
-
-**Cost:** operations spanning complex block structures are harder than in an AST-first editor.
-
-### Controlled string value
-
-**Benefit:** simple React integration and no hidden persistence model.
-
-**Cost:** sufficiently large documents require care because the Markdown string and line representation are reconstructed as edits occur.
-
-### Textarea editing instead of `contenteditable`
-
-**Benefit:** predictable caret/input behavior and fewer browser-specific rich-text edge cases.
-
-**Cost:** rich inline WYSIWYG editing is intentionally outside the package's scope.
-
-### Extension API instead of exposing internals
-
-**Benefit:** consumers can add keyboard/paste/decorating behavior without coupling themselves to component implementation details.
-
-**Cost:** extensions can only perform operations represented by the public API.
-
-## How it works
-
-The editor is essentially a list of lines:
-
-- **Line** = one row of Markdown text
-- **Active line** = the focused editable `<textarea>`
-- **Inactive line** = rendered Markdown preview
-
-Supported line types include:
-
-- `h1`, `h2`, `h3`, `h4`
-- list items, including tasks and ordered lists
-- blockquotes
-- paragraphs
-
-## DOM structure
-
-```html
-<div class="editor-root">
-  <div class="editor-content">
-    <div data-line-index="0" class="line h1">
-      <div data-role="line-content"></div>
-      <!-- textarea replaces the preview while active -->
-    </div>
-  </div>
-</div>
+```text
+- unordered    → • unordered
+7. ordered     → 7. ordered
+- [ ] todo     → ☐ todo
+- [x] done     → ☑ done
+> quote        → > quote
 ```
 
-Useful selectors:
+Leading indentation is retained visually for nested list/quote previews. When editing, the textarea contains the original Markdown source unchanged.
 
-- `[data-line-index="N"]` → a specific line
-- `[data-role="line-content"]` → rendered line content
+## Selection and caret mapping
 
-## Styling
+Inactive lines keep the source-backed content in a dedicated `[data-role="source-content"]` element. Extension prefix/suffix decorations live outside that source-mapped element, so decorative text does not shift source offsets.
 
-```tsx
-<HybridMarkdownEditor
-  value={value}
-  onChange={setValue}
-  classNames={{
-    root: 'my-editor-root',
-    content: 'my-editor-content',
-    activeLine: 'my-editor-active-line',
-    lineTypes: {
-      h1: 'heading-1',
-      h2: 'heading-2',
-      li: 'list-item',
-      blockquote: 'blockquote',
-      p: 'paragraph',
-    },
-    line: ({ type }) => (type === 'li' ? 'list-item-custom' : ''),
-  }}
-/>
-```
+For custom `renderLine` implementations, the provided `defaultContent` contains the source-mapped element. If a custom renderer keeps that node, clicks inside it retain exact source mapping. Clicks on unrelated custom content safely activate at the end of the source line rather than inventing an incorrect mapping.
 
-Applied class order per line:
+Malformed/literal `**` sequences remain literal and are no longer treated as invisible formatting markers by caret mapping.
 
-`lineTypes[type]` → `activeLine` (when focused) → `line`
+## Read-only mode
+
+`readOnly` prevents activation, textarea editing, extension editing entry points, and rendered-selection deletion. Changing `readOnly` to `true` while a line is active immediately returns it to preview mode.
 
 ## Props
 
 | Prop | Type | Description |
 | --- | --- | --- |
 | `value` | `string` | Controlled Markdown value |
-| `onChange` | `(v) => void` | Fires on every edit |
-| `onDebouncedChange` | `(v) => void` | Fires after debounce delay |
-| `debounceMs` | `number` | Debounce delay, default `1000` |
-| `readOnly` | `boolean` | Read-only mode |
+| `onChange` | `(value: string) => void` | Fires for every committed document edit |
+| `onDebouncedChange` | `(value: string) => void` | Fires after the configured quiet period |
+| `debounceMs` | `number` | Debounce delay; default `1000` |
+| `readOnly` | `boolean` | Disables all document mutations |
 | `className` | `string` | Extra root class |
-| `classNames` | `object` | Styling hooks |
-| `renderLine` | `function` | Custom renderer |
-| `options` | `object` | Behavior options |
+| `classNames` | `object` | Class hooks for editor surfaces |
+| `styles` | `object` | Inline style overrides applied after structural defaults |
+| `renderLine` | `function` | Custom inactive-line renderer |
+| `options` | `object` | Editing behavior options |
+| `extensions` | `EditorExtension[]` | Keyboard/paste/decorating extensions |
 
 ### Behavior options
 
@@ -194,21 +117,51 @@ Applied class order per line:
   onChange={setValue}
   options={{
     indentSize: 4,
-    continueListsOnEnter: false,
+    continueListsOnEnter: true,
     pasteSplitLines: true,
   }}
 />
 ```
 
+### Styling hooks
+
+```tsx
+<HybridMarkdownEditor
+  value={value}
+  onChange={setValue}
+  classNames={{
+    root: 'editor',
+    content: 'editor-content',
+    line: 'editor-line',
+    activeLine: 'editor-line-active',
+    preview: 'editor-preview',
+    textarea: 'editor-textarea',
+    marker: 'editor-marker',
+    lineTypes: {
+      h1: 'heading-1',
+      li: 'list-item',
+      blockquote: 'quote',
+      p: 'paragraph',
+    },
+  }}
+  styles={{
+    textarea: { fontFamily: 'inherit' },
+    marker: { minWidth: 24 },
+  }}
+/>
+```
+
+`styles` are spread after the component's structural defaults so consumers can override those defaults without relying on `!important`.
+
 ## Extensions API
 
 ```ts
 type EditorExtension = {
-  onKeyDown?: (e, api) => boolean | void;
-  onPaste?: (e, api) => boolean | void;
-  renderLinePrefix?: (ctx) => React.ReactNode;
-  renderLineSuffix?: (ctx) => React.ReactNode;
-}
+  onKeyDown?: (event, api) => boolean | void;
+  onPaste?: (event, api) => boolean | void;
+  renderLinePrefix?: (context) => React.ReactNode;
+  renderLineSuffix?: (context) => React.ReactNode;
+};
 
 type ExtensionApi = {
   getValue: () => string;
@@ -218,48 +171,78 @@ type ExtensionApi = {
   insertLine: (index: number, value: string) => void;
   deleteLines: (start: number, count: number) => void;
   getActiveLineIndex: () => number | null;
-  setActiveLineIndex: (idx: number | null, caret?: number | null) => void;
-}
-```
-
-### Example extension: toggle TODOs
-
-```tsx
-const todoExtension = {
-  onKeyDown: (e, api) => {
-    if (e.ctrlKey && e.key.toLowerCase() === 't') {
-      const idx = api.getActiveLineIndex();
-      if (idx == null) return;
-
-      const line = api.getLine(idx) ?? '';
-      api.setLine(idx, line.replace(/^(\s*[-*]\s)\[ \]/, '$1[x]'));
-
-      e.preventDefault();
-      return true;
-    }
-  },
+  setActiveLineIndex: (index: number | null, caret?: number | null) => void;
 };
 ```
 
+Mutation methods on `ExtensionApi` use the same central commit path as built-in edits, including `onChange` and debounced notifications.
+
+Prefix/suffix render hooks run in both preview and active states and receive the actual `isActive` value.
+
+## Keyboard behavior
+
+- **Enter** splits at the current selection and optionally continues the current list/quote.
+- **Backspace at column 0** joins with the previous Markdown line.
+- **Backspace near a list marker** removes the marker before deleting content.
+- **Tab / Shift+Tab** indent or dedent list/quote items.
+- **Arrow Up** moves to the previous Markdown line only when the caret is at source column 0.
+- **Arrow Down** moves to the next Markdown line only when the caret is at the end of the source line.
+
+Keeping Arrow Up/Down native in the middle of the textarea avoids breaking normal navigation through visually wrapped text.
+
 ## Verification
 
-The package includes a Vitest suite and now runs tests and package builds in GitHub Actions for pushes and pull requests.
+The test suite includes helper-level tests plus interaction/regression tests for the component contract. CI verifies:
 
 ```bash
+npm ci
+npm run typecheck
 npm test
 npm run build
+npm pack --dry-run
+npm audit --audit-level=high
 ```
+
+Regression coverage includes:
+
+- every built-in mutation path emitting `onChange`
+- extension mutations emitting changes
+- controlled debounce behavior
+- external value replacement
+- strict read-only behavior
+- selected-text replacement on Enter/paste
+- line merges and list-marker removal
+- list continuation/indentation/dedentation
+- rendered same-line and cross-line deletion
+- ordered/task/nested list preview behavior
+- extension source-mapping isolation
+- malformed bold syntax mapping
+- focus/scroll behavior
+- Arrow navigation boundaries
+- ReDoS-oriented long-input rendering
+
+## Package surface
+
+The npm entry point intentionally exports only:
+
+- `HybridMarkdownEditor`
+- `parseBold`
+- `mapDisplayOffsetToSourceIndex`
+- `EditorExtension`
+- `ExtensionApi`
+- `HybridMarkdownEditorProps`
+
+Internal test helpers remain outside the public package entry point.
 
 ## Scope / known limitations
 
-This project intentionally does **not** try to be a complete ProseMirror/TipTap-style document engine.
+This is deliberately a line-oriented editor rather than a ProseMirror/TipTap-style document engine.
 
-- Complex nested block editing is limited by the line-oriented model.
+- Complex nested block semantics are limited by the line model.
 - Collaborative editing/CRDT behavior is outside the package.
 - Persistence and undo history belong to the host application.
-- Very large documents may eventually require virtualization or a different underlying document representation.
-
-Those are deliberate boundaries: the package aims to stay understandable and embeddable rather than absorb every editor responsibility.
+- Very large documents may eventually need virtualization or a different document representation.
+- Custom renderers that replace `defaultContent` completely cannot provide exact click-to-source mapping unless they preserve or implement their own source-mapped content.
 
 ## License
 

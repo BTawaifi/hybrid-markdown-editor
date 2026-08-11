@@ -26,8 +26,17 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Run tests
+      - name: Type-check public and internal code
+        run: npm run typecheck
+
+      - name: Run regression suite
         run: npm test
 
       - name: Build package
         run: npm run build
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Check runtime dependency advisories
+        run: npm audit --omit=dev --audit-level=high
