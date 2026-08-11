@@ -28,27 +28,11 @@ jobs:
       - name: Refresh lockfile
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
-      - name: Restore strict CI install
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('.github/workflows/ci.yml')
-          text = path.read_text()
-          old = 'run: npm install --no-audit --no-fund'
-          new = 'run: npm ci --no-audit --no-fund'
-          if old not in text:
-              raise SystemExit('Expected temporary npm install command not found in ci.yml')
-          path.write_text(text.replace(old, new))
-          PY
-
-      - name: Remove one-time workflow
-        run: rm .github/workflows/refresh-lock-once.yml
-
-      - name: Commit deterministic dependency state
+      - name: Commit lockfile
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package-lock.json .github/workflows/ci.yml .github/workflows/refresh-lock-once.yml
+          git add package-lock.json
           git diff --cached --stat
-          git commit -m 'ci: restore deterministic npm install'
+          git commit -m 'chore: refresh npm lockfile'
           git push
