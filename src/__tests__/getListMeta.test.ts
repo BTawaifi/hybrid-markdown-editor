@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { getListMeta } from '../HybridMarkdownEditor';
 
 describe('getListMeta', () => {
@@ -33,8 +34,6 @@ describe('getListMeta', () => {
     });
 
     it('should identify task lists without a space before bracket', () => {
-      // It expects a space before bracket, let's see what the actual function does
-      // /^\s*[-*]\s\[[ xX]\]\s/ requires a space
       const result = getListMeta('-[ ] Invalid task');
       expect(result.kind).not.toBe('task');
     });
