@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 
+type TextareaStyle = React.ComponentProps<typeof TextareaAutosize>["style"];
+
 type ListKind = "ul" | "ol" | "task" | "blockquote" | null;
 type ListMeta = {
   kind: ListKind;
@@ -51,6 +53,17 @@ export interface HybridMarkdownEditorProps {
     line?: string | ((ctx: { index: number; type: LineType; isActive: boolean }) => string);
     activeLine?: string;
     lineTypes?: Partial<Record<LineType, string>>;
+    preview?: string;
+    textarea?: string;
+    marker?: string;
+  };
+  styles?: {
+    root?: React.CSSProperties;
+    content?: React.CSSProperties;
+    line?: React.CSSProperties;
+    preview?: React.CSSProperties;
+    textarea?: TextareaStyle;
+    marker?: React.CSSProperties;
   };
   renderLine?: (ctx: {
     index: number;
@@ -60,9 +73,9 @@ export interface HybridMarkdownEditorProps {
     defaultContent: React.ReactNode;
   }) => React.ReactNode;
   options?: {
-    indentSize?: number; // default 2
-    continueListsOnEnter?: boolean; // default true
-    pasteSplitLines?: boolean; // default true
+    indentSize?: number;
+    continueListsOnEnter?: boolean;
+    pasteSplitLines?: boolean;
   };
   extensions?: EditorExtension[];
 }
@@ -78,6 +91,13 @@ const LI_TASK_REGEX = /^\s*[-*]\s\[[ xX]\]\s/;
 const LI_UL_REGEX = /^\s*[-*]\s/;
 const LI_OL_REGEX = /^\s*\d+\.\s/;
 const BLOCKQUOTE_REGEX = /^\s*>\s/;
+const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d+\.\s|\s*>\s)/;
+const BOLD_TOKEN_REGEX = /\*\*([^*]+)\*\*/g;
+const INDENT_REGEX = /^(\s*)/;
+const LIST_TASK_MATCH_REGEX = /^(\s*)([-*])\s\[([ xX])\]\s/;
+const LIST_UL_MATCH_REGEX = /^(\s*)([-*])\s/;
+const LIST_OL_MATCH_REGEX = /^(\s*)(\d+)\.\s/;
+const LIST_BQ_MATCH_REGEX = /^(\s*)>\s/;
 
 export const getMarkdownType = (line: string): LineType => {
   if (H1_REGEX.test(line)) return "h1";
@@ -90,37 +110,14 @@ export const getMarkdownType = (line: string): LineType => {
   if (BLOCKQUOTE_REGEX.test(line)) return "blockquote";
   return "p";
 };
-const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d+\.\s|\s*>\s)/;
-
-
-const BOLD_REGEX = /(\*\*[^*]+\*\*)/g;
-const BOLD_STRIP_REGEX = /\*\*/g;
-
-export const parseBold = (text: string): (string | React.ReactElement)[] => {
-  const parts = text.split(BOLD_REGEX);
-  return parts.map((part, idx) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={idx}>{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
-};
-
-const INDENT_REGEX = /^(\s*)/;
-const LIST_TASK_MATCH_REGEX = /^(\s*)([-*])\s\[[ xX]\]\s/;
-const TASK_CHECKED_REGEX = /\[[xX]\]/;
-const LIST_UL_MATCH_REGEX = /^(\s*)([-*])\s/;
-const LIST_OL_MATCH_REGEX = /^(\s*)(\d+)\.\s/;
-const LIST_BQ_MATCH_REGEX = /^(\s*)>\s/;
 
 export const getListMeta = (line: string): ListMeta => {
-  const indentMatch = line.match(INDENT_REGEX);
-  const indent = indentMatch ? indentMatch[1] : "";
+  const indent = line.match(INDENT_REGEX)?.[1] ?? "";
 
   const taskMatch = line.match(LIST_TASK_MATCH_REGEX);
   if (taskMatch) {
-    const isChecked = TASK_CHECKED_REGEX.test(line);
-    const currentMarker = `${taskMatch[1]}${taskMatch[2]} [${isChecked ? "x" : " "}] `;
+    const checked = taskMatch[3].toLowerCase() === "x";
+    const currentMarker = `${taskMatch[1]}${taskMatch[2]} [${checked ? "x" : " "}] `;
     const nextMarker = `${taskMatch[1]}${taskMatch[2]} [ ] `;
     return { kind: "task", indent, currentMarker, nextMarker };
   }
@@ -134,9 +131,13 @@ export const getListMeta = (line: string): ListMeta => {
   const olMatch = line.match(LIST_OL_MATCH_REGEX);
   if (olMatch) {
     const number = parseInt(olMatch[2], 10);
-    const currentMarker = `${olMatch[1]}${number}. `;
-    const nextMarker = `${olMatch[1]}${number + 1}. `;
-    return { kind: "ol", indent, currentMarker, nextMarker, number };
+    return {
+      kind: "ol",
+      indent,
+      currentMarker: `${olMatch[1]}${number}. `,
+      nextMarker: `${olMatch[1]}${number + 1}. `,
+      number,
+    };
   }
 
   const bqMatch = line.match(LIST_BQ_MATCH_REGEX);
@@ -148,29 +149,87 @@ export const getListMeta = (line: string): ListMeta => {
   return { kind: null, indent, currentMarker: "", nextMarker: "" };
 };
 
-const getRemovedPrefixLength = (line: string): number => {
-  const match = line.match(MARKDOWN_PREFIX_REGEX);
-  return match ? match[0].length : 0;
+type BoldToken = {
+  kind: "text" | "bold";
+  text: string;
+  sourceStart: number;
+  sourceEnd: number;
+};
+
+const tokenizeBold = (text: string): BoldToken[] => {
+  const tokens: BoldToken[] = [];
+  let cursor = 0;
+  BOLD_TOKEN_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = BOLD_TOKEN_REGEX.exec(text)) !== null) {
+    if (match.index > cursor) {
+      tokens.push({
+        kind: "text",
+        text: text.slice(cursor, match.index),
+        sourceStart: cursor,
+        sourceEnd: match.index,
+      });
+    }
+    tokens.push({
+      kind: "bold",
+      text: match[1],
+      sourceStart: match.index,
+      sourceEnd: BOLD_TOKEN_REGEX.lastIndex,
+    });
+    cursor = BOLD_TOKEN_REGEX.lastIndex;
+  }
+  if (cursor < text.length || tokens.length === 0) {
+    tokens.push({ kind: "text", text: text.slice(cursor), sourceStart: cursor, sourceEnd: text.length });
+  }
+  return tokens;
+};
+
+export const parseBold = (text: string): (string | React.ReactElement)[] =>
+  tokenizeBold(text).map((token, idx) =>
+    token.kind === "bold" ? <strong key={idx}>{token.text}</strong> : token.text
+  );
+
+const getRemovedPrefixLength = (line: string): number =>
+  line.match(MARKDOWN_PREFIX_REGEX)?.[0].length ?? 0;
+
+const buildVisibleSourceIndices = (line: string): { indices: number[]; end: number } => {
+  const prefix = getRemovedPrefixLength(line);
+  const content = line.slice(prefix);
+  const indices: number[] = [];
+
+  for (const token of tokenizeBold(content)) {
+    if (token.kind === "text") {
+      for (let i = 0; i < token.text.length; i += 1) {
+        indices.push(prefix + token.sourceStart + i);
+      }
+    } else {
+      const visibleStart = token.sourceStart + 2;
+      for (let i = 0; i < token.text.length; i += 1) {
+        indices.push(prefix + visibleStart + i);
+      }
+    }
+  }
+
+  return { indices, end: line.length };
 };
 
 export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
-  const prefix = getRemovedPrefixLength(line);
-  const content = line.slice(prefix);
-  let i = 0;
-  let displayCount = 0;
-  while (i < content.length) {
-    if (content.startsWith("**", i)) {
-      i += 2;
-      continue;
-    }
-    if (displayCount === displayOffset) {
-      return prefix + i;
-    }
-    i += 1;
-    displayCount += 1;
-  }
-  return line.length;
+  const { indices, end } = buildVisibleSourceIndices(line);
+  if (indices.length === 0) return end;
+  const offset = Math.max(0, Math.floor(displayOffset));
+  if (offset >= indices.length) return end;
+  return indices[offset];
 };
+
+const mapSourceIndexToDisplayOffset = (line: string, sourceIndex: number): number => {
+  const { indices } = buildVisibleSourceIndices(line);
+  if (indices.length === 0) return 0;
+  const target = Math.max(0, sourceIndex);
+  const found = indices.findIndex((index) => index >= target);
+  return found === -1 ? indices.length : found;
+};
+
+const getDisplayContentLength = (line: string): number => buildVisibleSourceIndices(line).indices.length;
 
 const getFallbackDisplayOffset = (container: HTMLElement, clientX: number): number => {
   const rect = container.getBoundingClientRect();
@@ -189,10 +248,14 @@ export const getClickDisplayOffset = (
 ): number => {
   let caretNode: Node | null = null;
   let caretOffset = 0;
-  const anyDoc: any = document as any;
+  const anyDoc = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+
   try {
     if (typeof anyDoc.caretRangeFromPoint === "function") {
-      const range: Range = anyDoc.caretRangeFromPoint(clientX, clientY);
+      const range = anyDoc.caretRangeFromPoint(clientX, clientY);
       if (range) {
         caretNode = range.startContainer;
         caretOffset = range.startOffset;
@@ -204,31 +267,50 @@ export const getClickDisplayOffset = (
         caretOffset = pos.offset;
       }
     }
-  } catch { /* Ignore errors from experimental caret position APIs; fallback logic below handles missing caretNode. */ }
-  if (!caretNode) {
+  } catch {
+    // Browser caret APIs are optional/experimental. Coordinate fallback below is intentional.
+  }
+
+  if (!caretNode || !container.contains(caretNode)) {
     return getFallbackDisplayOffset(container, clientX);
   }
+
   try {
-    const r = document.createRange();
-    r.selectNodeContents(container);
-    r.setEnd(caretNode, caretOffset);
-    return r.toString().length;
-  } catch { // Range operations may fail if nodes are no longer in the DOM or selection is invalid; fallback to coordinate-based estimation.
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    range.setEnd(caretNode, caretOffset);
+    return range.toString().length;
+  } catch {
     return getFallbackDisplayOffset(container, clientX);
   }
+};
+
+const getListMarker = (line: string): string | null => {
+  const meta = getListMeta(line);
+  if (meta.kind === "ul") return "•";
+  if (meta.kind === "ol") return `${meta.number ?? 1}.`;
+  if (meta.kind === "task") {
+    const taskMatch = line.match(LIST_TASK_MATCH_REGEX);
+    return taskMatch?.[3]?.toLowerCase() === "x" ? "☑" : "☐";
+  }
+  if (meta.kind === "blockquote") return ">";
+  return null;
 };
 
 const EditorLine: React.FC<{
   index: number;
   line: string;
   isActive: boolean;
+  readOnly: boolean;
+  focusVersion: number;
   onUpdate: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  onFocus: () => void;
+  onActivate: (caret?: number | null) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   cursorPositionRef: React.MutableRefObject<number | null>;
   isSelectingRef: React.MutableRefObject<boolean>;
   classNames?: HybridMarkdownEditorProps["classNames"];
+  styles?: HybridMarkdownEditorProps["styles"];
   renderLine?: HybridMarkdownEditorProps["renderLine"];
   extensionsPrefix?: EditorExtension[];
   extensionsSuffix?: EditorExtension[];
@@ -236,31 +318,37 @@ const EditorLine: React.FC<{
   index,
   line,
   isActive,
+  readOnly,
+  focusVersion,
   onUpdate,
-  onFocus,
+  onActivate,
   onKeyDown,
   onPaste,
   cursorPositionRef,
   isSelectingRef,
   classNames,
+  styles,
   renderLine,
   extensionsPrefix,
   extensionsSuffix,
 }) => {
   const type = getMarkdownType(line);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const listMeta = type === "li" || type === "blockquote" ? getListMeta(line) : null;
+  const marker = getListMarker(line);
+  const indentPx = listMeta ? Math.min(160, listMeta.indent.replace(/\t/g, "  ").length * 8) : 0;
 
   useEffect(() => {
-    if (isActive && textareaRef.current) {
-      textareaRef.current.focus();
-      const pos = cursorPositionRef.current;
-      if (typeof pos === "number") {
-        textareaRef.current.setSelectionRange(pos, pos);
-        cursorPositionRef.current = null;
-      }
-      textareaRef.current.scrollIntoView({ block: "nearest" });
+    if (!isActive || readOnly || !textareaRef.current) return;
+    textareaRef.current.focus();
+    const pos = cursorPositionRef.current;
+    if (typeof pos === "number") {
+      const safe = Math.max(0, Math.min(textareaRef.current.value.length, pos));
+      textareaRef.current.setSelectionRange(safe, safe);
+      cursorPositionRef.current = null;
     }
-  }, [isActive, line]);
+    textareaRef.current.scrollIntoView({ block: "nearest" });
+  }, [isActive, readOnly, focusVersion, cursorPositionRef]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const caret = e.currentTarget.selectionStart ?? null;
@@ -270,99 +358,109 @@ const EditorLine: React.FC<{
     onUpdate(e);
   };
 
-  const baseLineStyle: React.CSSProperties = {
-    width: "100%",
-    position: "relative",
-    userSelect: "text",
-    cursor: "text",
-  };
-  const typeStyle: React.CSSProperties =
-    type === "li"
-      ? { paddingLeft: 20 }
-      : type === "blockquote"
-      ? { borderLeft: "4px solid #ddd", paddingLeft: 16, fontStyle: "italic" }
-      : {};
-  const activeStyle: React.CSSProperties = isActive ? { backgroundColor: "rgba(0,0,0,0.06)", borderRadius: 6 } : {};
-  const typeClass = (classNames?.lineTypes && classNames.lineTypes[type]) || "";
-  const activeClass = isActive ? (classNames?.activeLine || "") : "";
+  const typeClass = classNames?.lineTypes?.[type] || "";
+  const activeClass = isActive ? classNames?.activeLine || "" : "";
   const customLineClass =
-    typeof classNames?.line === "function" ? classNames.line({ index, type, isActive }) : classNames?.line || "";
+    typeof classNames?.line === "function"
+      ? classNames.line({ index, type, isActive })
+      : classNames?.line || "";
 
-  const defaultRendered = (
-    <>
-      {line.trim() === ""
-        ? "\u00A0"
-        : parseBold(
-            line.replace(MARKDOWN_PREFIX_REGEX, "")
-          )}
-    </>
+  const sourceContent = line.replace(MARKDOWN_PREFIX_REGEX, "");
+  const defaultContent = (
+    <span data-role="source-content">
+      {line.trim() === "" ? "\u00A0" : parseBold(sourceContent)}
+    </span>
   );
 
   return (
     <div
       data-line-index={index}
       className={cx(typeClass, activeClass, customLineClass)}
-      style={{ ...baseLineStyle, ...typeStyle, ...activeStyle }}
+      style={{ position: "relative", width: "100%", userSelect: "text", ...styles?.line }}
     >
-      {type === "li" && (
-        <span
-          style={{ position: "absolute", left: 0, top: "0.3em", fontSize: "1.1em", lineHeight: 1, pointerEvents: "none", userSelect: "none" }}
-        >
-          •
-        </span>
-      )}
-
-      {isActive ? (
-        <TextareaAutosize
-          ref={textareaRef}
-          value={line}
-          onChange={handleChange}
-          onKeyDown={onKeyDown}
-          onFocus={onFocus}
-          onPaste={onPaste}
-          onSelect={(e) => {
-            const caret = (e.target as HTMLTextAreaElement).selectionStart ?? null;
-            if (!isSelectingRef.current && typeof caret === "number") {
-              cursorPositionRef.current = caret;
-            }
-          }}
-          onMouseDown={(ev) => {
-            ev.stopPropagation();
-          }}
-          autoFocus
-          style={{
-            width: "100%",
-            resize: "none",
-            overflow: "hidden",
-            background: "transparent",
-            outline: "none",
-            padding: 0,
-            border: "none",
-            paddingLeft: type === "li" ? 20 : 0,
-          }}
-        />
+      {isActive && !readOnly ? (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          {extensionsPrefix?.map((ext, extIndex) => (
+            <React.Fragment key={`active-prefix-${extIndex}`}>
+              {ext.renderLinePrefix?.({ index, line, type, isActive }) || null}
+            </React.Fragment>
+          ))}
+          <TextareaAutosize
+            ref={textareaRef}
+            aria-label={`Markdown line ${index + 1}`}
+            className={classNames?.textarea}
+            value={line}
+            onChange={handleChange}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onSelect={(e) => {
+              const caret = (e.target as HTMLTextAreaElement).selectionStart ?? null;
+              if (!isSelectingRef.current && typeof caret === "number") {
+                cursorPositionRef.current = caret;
+              }
+            }}
+            autoFocus
+            style={{
+              width: "100%",
+              resize: "none",
+              overflow: "hidden",
+              background: "transparent",
+              outline: "none",
+              padding: 0,
+              border: "none",
+              ...styles?.textarea,
+            }}
+          />
+          {extensionsSuffix?.map((ext, extIndex) => (
+            <React.Fragment key={`active-suffix-${extIndex}`}>
+              {ext.renderLineSuffix?.({ index, line, type, isActive }) || null}
+            </React.Fragment>
+          ))}
+        </div>
       ) : (
         <div
-          data-role="line-content"
-          style={{ userSelect: "text", paddingLeft: type === "li" ? 20 : 0 }}
-          onMouseUp={(ev) => {
-            const sel = window.getSelection();
-            const container = ev.currentTarget as HTMLDivElement;
-            const clickLike = !sel || sel.isCollapsed || (sel && sel.toString().length === 0);
-            if (clickLike) {
-              const offsetInDisplay = getClickDisplayOffset(container, ev.clientX, ev.clientY);
-              const desired = mapDisplayOffsetToSourceIndex(line, offsetInDisplay);
-              (cursorPositionRef as React.MutableRefObject<number | null>).current = desired;
-              setTimeout(() => onFocus(), 0);
+          data-role="line-preview"
+          className={classNames?.preview}
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: marker ? 8 : 0,
+            paddingLeft: indentPx,
+            ...styles?.preview,
+          }}
+          onMouseUp={(event) => {
+            if (readOnly) return;
+            const selection = window.getSelection();
+            if (selection && !selection.isCollapsed && selection.toString().length > 0) return;
+
+            const target = event.target as HTMLElement;
+            const sourceEl = target.closest('[data-role="source-content"]') as HTMLElement | null;
+            if (!sourceEl) {
+              onActivate(line.length);
               return;
             }
+            const offset = getClickDisplayOffset(sourceEl, event.clientX, event.clientY);
+            onActivate(mapDisplayOffsetToSourceIndex(line, offset));
           }}
         >
-          {extensionsPrefix?.map((ext) => ext.renderLinePrefix?.({ index, line, type, isActive }) || null)}
+          {extensionsPrefix?.map((ext, extIndex) => (
+            <React.Fragment key={`prefix-${extIndex}`}>
+              {ext.renderLinePrefix?.({ index, line, type, isActive }) || null}
+            </React.Fragment>
+          ))}
+          {marker ? (
+            <span data-role="line-marker" className={classNames?.marker} style={{ flex: "0 0 auto", userSelect: "none", ...styles?.marker }}>
+              {marker}
+            </span>
+          ) : null}
           {renderLine
-            ? renderLine({ index, line, type, isActive, defaultContent: defaultRendered })
-            : defaultRendered}
-          {extensionsSuffix?.map((ext) => ext.renderLineSuffix?.({ index, line, type, isActive }) || null)}
+            ? renderLine({ index, line, type, isActive, defaultContent })
+            : defaultContent}
+          {extensionsSuffix?.map((ext, extIndex) => (
+            <React.Fragment key={`suffix-${extIndex}`}>
+              {ext.renderLineSuffix?.({ index, line, type, isActive }) || null}
+            </React.Fragment>
+          ))}
         </div>
       )}
     </div>
@@ -377,19 +475,103 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   className,
   readOnly = false,
   classNames,
+  styles,
   renderLine,
   options,
   extensions,
 }) => {
-  const [lines, setLines] = useState<string[]>(() => (value || "").split("\n"));
+  const initialLines = (value || "").split("\n");
+  const [lines, setLines] = useState<string[]>(initialLines);
+  const linesRef = useRef<string[]>(initialLines);
   const [activeLineIndex, setActiveLineIndex] = useState<number | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
+  const [focusVersion, setFocusVersion] = useState(0);
   const cursorPositionRef = useRef<number | null>(null);
-  const isSelectingRef = useRef<boolean>(false);
-  const selectionAnchorRef = useRef<{ index: number; offset: number } | null>(null);
+  const isSelectingRef = useRef(false);
+  const selectionAnchorRef = useRef<{ index: number; displayOffset: number } | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const draggingFromTextareaRef = useRef<boolean>(false);
-  const bridgingSelectionRef = useRef<boolean>(false);
+  const draggingFromTextareaRef = useRef(false);
+  const bridgingSelectionRef = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onChangeRef = useRef(onChange);
+  const onDebouncedChangeRef = useRef(onDebouncedChange);
+  const debounceMsRef = useRef(debounceMs);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    onDebouncedChangeRef.current = onDebouncedChange;
+  }, [onDebouncedChange]);
+
+  useEffect(() => {
+    debounceMsRef.current = debounceMs;
+  }, [debounceMs]);
+
+  useEffect(() => () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    const incoming = (value || "").split("\n");
+    const current = linesRef.current.join("\n");
+    if (current === (value || "")) return;
+    linesRef.current = incoming;
+    setLines(incoming);
+    setActiveLineIndex((currentIndex) =>
+      currentIndex !== null && currentIndex >= incoming.length ? null : currentIndex
+    );
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+  }, [value]);
+
+  useEffect(() => {
+    if (readOnly) setActiveLineIndex(null);
+  }, [readOnly]);
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      isSelectingRef.current = false;
+    };
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, []);
+
+  const scheduleDebouncedChange = (content: string) => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    if (!onDebouncedChangeRef.current) return;
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      onDebouncedChangeRef.current?.(content);
+    }, Math.max(0, debounceMsRef.current));
+  };
+
+  const commitLines = (nextOrUpdater: string[] | ((prev: string[]) => string[])) => {
+    if (readOnly) return linesRef.current;
+    const prev = linesRef.current;
+    const nextRaw = typeof nextOrUpdater === "function" ? nextOrUpdater(prev) : nextOrUpdater;
+    const next = nextRaw.length === 0 ? [""] : nextRaw;
+    const previousContent = prev.join("\n");
+    const content = next.join("\n");
+    if (content === previousContent) return prev;
+    linesRef.current = next;
+    setLines(next);
+    onChangeRef.current?.(content);
+    scheduleDebouncedChange(content);
+    return next;
+  };
+
+  const requestFocus = (index: number | null, caret?: number | null) => {
+    if (readOnly) return;
+    if (typeof caret === "number") cursorPositionRef.current = caret;
+    const safeIndex = index === null
+      ? null
+      : Math.max(0, Math.min(linesRef.current.length - 1, index));
+    setActiveLineIndex(safeIndex);
+    setFocusVersion((version) => version + 1);
+  };
 
   const extensionsWithKeyDown = useMemo(
     () => (extensions || []).filter((ext) => !!ext.onKeyDown),
@@ -408,511 +590,450 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     [extensions]
   );
 
-  useEffect(() => {
-    setLines((value || "").split("\n"));
-    setIsDirty(false);
-  }, [value]);
-
-  useEffect(() => {
-    if (!isDirty) return;
-    const handle = setTimeout(() => {
-      const content = lines.join("\n");
-      onDebouncedChange?.(content);
-      setIsDirty(false);
-    }, debounceMs);
-    return () => clearTimeout(handle);
-  }, [lines, isDirty, debounceMs, onDebouncedChange]);
-
-  useEffect(() => {
-    const handleMouseUp = () => {
-      isSelectingRef.current = false;
-    };
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => window.removeEventListener("mouseup", handleMouseUp);
-  }, []);
-
   const getLineElFromNode = (node: Node | null): HTMLElement | null => {
     if (!node) return null;
-    if (node instanceof HTMLElement && node.hasAttribute("data-line-index")) return node;
-    let el: HTMLElement | null = node instanceof HTMLElement ? node : node?.parentElement ?? null;
-    while (el && !el.hasAttribute("data-line-index")) {
-      el = el.parentElement;
-    }
-    return el;
+    const element = node instanceof HTMLElement ? node : node.parentElement;
+    return element?.closest?.("[data-line-index]") as HTMLElement | null;
   };
 
-  const getContentElFromLineEl = (lineEl: HTMLElement | null): HTMLElement | null => {
-    if (!lineEl) return null;
-    return (lineEl.querySelector('[data-role="line-content"]') as HTMLElement) || null;
-  };
+  const getSourceElFromLineEl = (lineEl: HTMLElement | null): HTMLElement | null =>
+    (lineEl?.querySelector('[data-role="source-content"]') as HTMLElement | null) ?? null;
 
-  const getDisplayOffsetInLine = (contentEl: HTMLElement, node: Node, nodeOffset: number): number => {
+  const getDisplayOffsetInLine = (sourceEl: HTMLElement, node: Node, nodeOffset: number): number => {
     try {
-      const r = document.createRange();
-      r.selectNodeContents(contentEl);
-      r.setEnd(node, nodeOffset);
-      return r.toString().length;
-    } catch { // If range calculation fails, default to 0 offset.
+      const range = document.createRange();
+      range.selectNodeContents(sourceEl);
+      range.setEnd(node, nodeOffset);
+      return range.toString().length;
+    } catch {
       return 0;
     }
   };
 
-  const getDisplayContentLength = (line: string): number => {
-    const stripped = line
-      .replace(MARKDOWN_PREFIX_REGEX, "")
-      .replace(BOLD_STRIP_REGEX, "");
-    return stripped.length;
-  };
-
-  const getLineContentElementByIndex = (idx: number): HTMLElement | null => {
-    const container = contentRef.current;
-    if (!container) return null;
-    const el = container.querySelector(`*[data-line-index="${idx}"] [data-role=\"line-content\"]`);
-    return (el as HTMLElement) || null;
-  };
+  const getSourceElementByIndex = (index: number): HTMLElement | null =>
+    (contentRef.current?.querySelector(
+      `*[data-line-index="${index}"] [data-role="source-content"]`
+    ) as HTMLElement | null) ?? null;
 
   const setSelectionFromDisplayPoints = (
-    startIdx: number,
+    startIndex: number,
     startDisplayOffset: number,
-    endIdx: number,
+    endIndex: number,
     endDisplayOffset: number
   ) => {
-    const startEl = getLineContentElementByIndex(startIdx);
-    const endEl = getLineContentElementByIndex(endIdx);
+    const startEl = getSourceElementByIndex(startIndex);
+    const endEl = getSourceElementByIndex(endIndex);
     if (!startEl || !endEl) return;
 
-    const resolvePoint = (el: HTMLElement, displayOffset: number): { node: Node; offset: number } | null => {
-      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
-      let remaining = displayOffset;
-      let node: Node | null = walker.nextNode();
+    const resolvePoint = (element: HTMLElement, displayOffset: number): { node: Node; offset: number } | null => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let remaining = Math.max(0, displayOffset);
+      let node = walker.nextNode();
       while (node) {
-        const len = (node.textContent || "").length;
-        if (remaining <= len) {
-          return { node, offset: Math.max(0, Math.min(len, remaining)) };
-        }
+        const len = node.textContent?.length ?? 0;
+        if (remaining <= len) return { node, offset: Math.min(len, remaining) };
         remaining -= len;
         node = walker.nextNode();
       }
-      const last = el.lastChild as Node | null;
-      if (last && last.nodeType === Node.TEXT_NODE) {
-        const len = (last.textContent || "").length;
-        return { node: last, offset: len };
-      }
-      const dummy = document.createTextNode("");
-      el.appendChild(dummy);
-      return { node: dummy, offset: 0 };
+      return element.lastChild ? { node: element, offset: element.childNodes.length } : null;
     };
 
-    const startPoint = resolvePoint(startEl, startDisplayOffset);
-    const endPoint = resolvePoint(endEl, endDisplayOffset);
-    if (!startPoint || !endPoint) return;
-    const sel = window.getSelection();
-    if (!sel) return;
-    const range = document.createRange();
-    range.setStart(startPoint.node, startPoint.offset);
-    range.setEnd(endPoint.node, endPoint.offset);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  };
+    const start = resolvePoint(startEl, startDisplayOffset);
+    const end = resolvePoint(endEl, endDisplayOffset);
+    const selection = window.getSelection();
+    if (!start || !end || !selection) return;
 
+    try {
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch {
+      // Ignore transient DOM changes while switching an active textarea back to preview mode.
+    }
+  };
 
   const createExtensionApi = (): ExtensionApi => ({
-    getValue: () => lines.join("\n"),
-    setValue: (next: string) => setLines(next.split("\n")),
-    getLine: (i: number) => lines[i],
-    setLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx[i] = s; return nx; }),
-    insertLine: (i: number, s: string) => setLines(prev => { const nx = [...prev]; nx.splice(i, 0, s); return nx; }),
-    deleteLines: (start: number, count: number) => setLines(prev => { const nx = [...prev]; nx.splice(start, count); return nx; }),
+    getValue: () => linesRef.current.join("\n"),
+    setValue: (next) => commitLines(next.split("\n")),
+    getLine: (index) => linesRef.current[index],
+    setLine: (index, nextLine) => {
+      if (index < 0 || index >= linesRef.current.length) return;
+      commitLines((prev) => {
+        const next = [...prev];
+        next[index] = nextLine;
+        return next;
+      });
+    },
+    insertLine: (index, nextLine) => {
+      const safeIndex = Math.max(0, Math.min(linesRef.current.length, index));
+      commitLines((prev) => {
+        const next = [...prev];
+        next.splice(safeIndex, 0, nextLine);
+        return next;
+      });
+    },
+    deleteLines: (start, count) => {
+      const safeStart = Math.max(0, start);
+      const safeCount = Math.max(0, count);
+      commitLines((prev) => {
+        const next = [...prev];
+        next.splice(safeStart, safeCount);
+        return next;
+      });
+    },
     getActiveLineIndex: () => activeLineIndex,
-    setActiveLineIndex: (i: number | null, caret?: number | null) => { if (typeof caret === 'number') cursorPositionRef.current = caret; setActiveLineIndex(i); },
+    setActiveLineIndex: (index, caret) => requestFocus(index, caret),
   });
 
-  const handleLineChange = (idx: number, value: string) => {
-    setLines((prev) => {
+  const handleLineChange = (index: number, nextValue: string) => {
+    commitLines((prev) => {
       const next = [...prev];
-      next[idx] = value;
+      next[index] = nextValue;
       return next;
     });
-    setIsDirty(true);
-    if (onChange) {
-      const nextLines = [...lines];
-      nextLines[idx] = value;
-      onChange(nextLines.join("\n"));
-    }
   };
 
-  const handlePaste = (
-    e: React.ClipboardEvent<HTMLTextAreaElement>,
-    idx: number
-  ) => {
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>, index: number) => {
+    if (readOnly) {
+      event.preventDefault();
+      return;
+    }
+
     if (extensionsWithPaste.length > 0) {
       const api = createExtensionApi();
-      for (const ext of extensionsWithPaste) {
-        const handled = ext.onPaste?.(e, api);
-        if (handled) return;
+      for (const extension of extensionsWithPaste) {
+        if (extension.onPaste?.(event, api)) return;
       }
     }
-    if ((window.getSelection()?.toString() || "").includes("\n")) {
-      return;
-    }
-    const text = e.clipboardData.getData("text");
-    const pasteSplit = options?.pasteSplitLines ?? true;
-    if (!pasteSplit || !text.includes("\n")) return;
 
-    e.preventDefault();
-    const caret = (e.target as HTMLTextAreaElement).selectionStart ?? 0;
-    const before = lines[idx].slice(0, caret);
-    const after = lines[idx].slice(caret);
-    const pasted = text.replace(/\r\n/g, "\n").split("\n");
-    setLines((prev) => {
+    const text = event.clipboardData.getData("text").replace(/\r\n?/g, "\n");
+    const pasteSplitLines = options?.pasteSplitLines ?? true;
+    if (!pasteSplitLines || !text.includes("\n")) return;
+
+    event.preventDefault();
+    const textarea = event.currentTarget;
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    const line = linesRef.current[index] ?? "";
+    const before = line.slice(0, selectionStart);
+    const after = line.slice(selectionEnd);
+    const pasted = text.split("\n");
+    const replacement = [before + pasted[0], ...pasted.slice(1, -1), pasted[pasted.length - 1] + after];
+
+    commitLines((prev) => {
       const next = [...prev];
-      const head = before + pasted[0];
-      const tail = pasted[pasted.length - 1] + after;
-      next[idx] = head;
-      if (pasted.length > 1) {
-        next.splice(idx + 1, 0, ...pasted.slice(1, -1), tail);
-      }
+      next.splice(index, 1, ...replacement);
       return next;
     });
-    setIsDirty(true);
-    const newIndex = idx + pasted.length - 1;
-    cursorPositionRef.current = pasted[pasted.length - 1].length;
-    setTimeout(() => setActiveLineIndex(newIndex), 0);
+
+    const newIndex = index + pasted.length - 1;
+    requestFocus(newIndex, pasted[pasted.length - 1].length);
   };
 
-  const handleKeyDown = (
-    e: React.KeyboardEvent<HTMLTextAreaElement>,
-    idx: number
-  ) => {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>, index: number) => {
+    if (readOnly) {
+      event.preventDefault();
+      return;
+    }
+
     if (extensionsWithKeyDown.length > 0) {
       const api = createExtensionApi();
-      for (const ext of extensionsWithKeyDown) {
-        const handled = ext.onKeyDown?.(e, api);
-        if (handled) return;
+      for (const extension of extensionsWithKeyDown) {
+        if (extension.onKeyDown?.(event, api)) return;
       }
     }
+
     if (isSelectingRef.current) return;
-    const textarea = e.currentTarget;
-    const caret = textarea.selectionStart;
+    const textarea = event.currentTarget;
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    const hasSelection = selectionEnd > selectionStart;
+    const currentLines = linesRef.current;
+    const line = currentLines[index] ?? "";
 
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const line = lines[idx];
+    if (event.key === "Enter") {
+      event.preventDefault();
       const meta = getListMeta(line);
-      const before = line.slice(0, caret ?? 0);
-      const after = line.slice(caret ?? 0);
+      const before = line.slice(0, selectionStart);
+      const after = line.slice(selectionEnd);
       const continueLists = options?.continueListsOnEnter ?? true;
-      if (
-        meta.kind &&
-        line
-          .replace(new RegExp("^" + meta.currentMarker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "")
-          .trim() === "" &&
-        (caret ?? 0) >= meta.currentMarker.length
-      ) {
-        setLines((prev) => {
+      const markerOnly =
+        meta.kind !== null &&
+        line.slice(meta.currentMarker.length).trim() === "" &&
+        selectionStart >= meta.currentMarker.length;
+
+      if (markerOnly) {
+        commitLines((prev) => {
           const next = [...prev];
-          next[idx] = meta.indent;
+          next[index] = meta.indent;
           return next;
         });
-        setIsDirty(true);
-        cursorPositionRef.current = meta.indent.length;
-        setTimeout(() => setActiveLineIndex(idx), 0);
+        requestFocus(index, meta.indent.length);
         return;
       }
-      setLines((prev) => {
+
+      const nextMarker = meta.kind && continueLists ? meta.nextMarker : "";
+      commitLines((prev) => {
         const next = [...prev];
-        if (meta.kind && continueLists) {
-          next[idx] = before;
-          next.splice(idx + 1, 0, meta.nextMarker + after);
-        } else {
-          next[idx] = before;
-          next.splice(idx + 1, 0, after);
-        }
+        next.splice(index, 1, before, nextMarker + after);
         return next;
       });
-      setIsDirty(true);
-      cursorPositionRef.current = (meta.kind && continueLists) ? meta.nextMarker.length : 0;
-      setTimeout(() => setActiveLineIndex(idx + 1), 0);
+      requestFocus(index + 1, nextMarker.length);
       return;
     }
 
-    if (e.key === "Backspace" && (caret ?? 0) === 0 && idx > 0) {
-      e.preventDefault();
-      const textToPrepend = lines[idx];
-      const prevLen = lines[idx - 1].length;
-      setLines((prev) => {
+    if (event.key === "Backspace" && !hasSelection && selectionStart === 0 && index > 0) {
+      event.preventDefault();
+      const previousLength = currentLines[index - 1].length;
+      commitLines((prev) => {
         const next = [...prev];
-        next[idx - 1] += textToPrepend;
-        next.splice(idx, 1);
+        next[index - 1] += next[index];
+        next.splice(index, 1);
         return next;
       });
-      setIsDirty(true);
-      cursorPositionRef.current = prevLen;
-      setTimeout(() => setActiveLineIndex(idx - 1), 0);
+      requestFocus(index - 1, previousLength);
       return;
     }
 
-    if (e.key === "Backspace") {
-      const line = lines[idx];
+    if (event.key === "Backspace" && !hasSelection) {
       const meta = getListMeta(line);
-      if (meta.kind && (caret ?? 0) <= meta.currentMarker.length && meta.currentMarker.length > 0) {
-        e.preventDefault();
-        setLines((prev) => {
+      if (meta.kind && selectionStart <= meta.currentMarker.length && meta.currentMarker.length > 0) {
+        event.preventDefault();
+        commitLines((prev) => {
           const next = [...prev];
-          next[idx] = line.slice(meta.currentMarker.length);
+          next[index] = line.slice(meta.currentMarker.length);
           return next;
         });
-        setIsDirty(true);
-        cursorPositionRef.current = 0;
-        setTimeout(() => setActiveLineIndex(idx), 0);
+        requestFocus(index, 0);
         return;
       }
     }
 
-    if (e.key === "Tab") {
-      const line = lines[idx];
+    if (event.key === "Tab") {
       const meta = getListMeta(line);
       if (meta.kind) {
-        e.preventDefault();
+        event.preventDefault();
         const rawIndentSize = options?.indentSize ?? 2;
-        const indentSize = Math.max(1, Math.min(32, Math.floor(Number.isFinite(rawIndentSize) ? rawIndentSize : 2)));
-        if (e.shiftKey) {
-          setLines((prev) => {
+        const indentSize = Math.max(
+          1,
+          Math.min(32, Math.floor(Number.isFinite(rawIndentSize) ? rawIndentSize : 2))
+        );
+
+        if (event.shiftKey) {
+          const removable = line.startsWith("\t")
+            ? 1
+            : Math.min(indentSize, line.match(/^ +/)?.[0].length ?? 0);
+          if (removable === 0) return;
+          commitLines((prev) => {
             const next = [...prev];
-            const re = new RegExp(`^\\s{${indentSize},}`);
-            if (re.test(line)) {
-              next[idx] = line.replace(new RegExp(`^ {${indentSize}}`), "");
-            }
+            next[index] = line.slice(removable);
             return next;
           });
-          setIsDirty(true);
-          cursorPositionRef.current = Math.max(0, (caret ?? 0) - indentSize);
-          setTimeout(() => setActiveLineIndex(idx), 0);
+          requestFocus(index, Math.max(0, selectionStart - removable));
         } else {
-          setLines((prev) => {
+          const indent = " ".repeat(indentSize);
+          commitLines((prev) => {
             const next = [...prev];
-            next[idx] = " ".repeat(indentSize) + line;
+            next[index] = indent + line;
             return next;
           });
-          setIsDirty(true);
-          cursorPositionRef.current = (caret ?? 0) + indentSize;
-          setTimeout(() => setActiveLineIndex(idx), 0);
+          requestFocus(index, selectionStart + indentSize);
         }
         return;
       }
     }
 
-    if (e.key === "ArrowUp" && idx > 0) {
-      e.preventDefault();
-      cursorPositionRef.current = caret ?? 0;
-      setActiveLineIndex(idx - 1);
+    if (event.key === "ArrowUp" && !hasSelection && selectionStart === 0 && index > 0) {
+      event.preventDefault();
+      requestFocus(index - 1, Math.min(currentLines[index - 1].length, selectionStart));
       return;
     }
-    if (e.key === "ArrowDown" && idx < lines.length - 1) {
-      e.preventDefault();
-      cursorPositionRef.current = caret ?? 0;
-      setActiveLineIndex(idx + 1);
-      return;
+
+    if (
+      event.key === "ArrowDown" &&
+      !hasSelection &&
+      selectionStart === line.length &&
+      index < currentLines.length - 1
+    ) {
+      event.preventDefault();
+      requestFocus(index + 1, Math.min(currentLines[index + 1].length, selectionStart));
     }
   };
 
   const deleteCurrentSelection = () => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
+    if (readOnly) return;
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) return;
     const container = contentRef.current;
-    if (!container) return;
-    if (!container.contains(sel.anchorNode) || !container.contains(sel.focusNode)) return;
+    if (!container || !container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
 
-    const anchorLineEl = getLineElFromNode(sel.anchorNode);
-    const focusLineEl = getLineElFromNode(sel.focusNode);
-    if (!anchorLineEl || !focusLineEl) return;
-    const anchorIdxAttr = anchorLineEl.getAttribute("data-line-index");
-    const focusIdxAttr = focusLineEl.getAttribute("data-line-index");
-    if (!anchorIdxAttr || !focusIdxAttr) return;
-    let aIdx = parseInt(anchorIdxAttr, 10);
-    let fIdx = parseInt(focusIdxAttr, 10);
-    if (Number.isNaN(aIdx) || Number.isNaN(fIdx)) return;
-    const anchorContentEl = getContentElFromLineEl(anchorLineEl);
-    const focusContentEl = getContentElFromLineEl(focusLineEl);
-    if (!anchorContentEl || !focusContentEl) return;
+    const anchorLineEl = getLineElFromNode(selection.anchorNode);
+    const focusLineEl = getLineElFromNode(selection.focusNode);
+    const anchorSourceEl = getSourceElFromLineEl(anchorLineEl);
+    const focusSourceEl = getSourceElFromLineEl(focusLineEl);
+    if (!anchorLineEl || !focusLineEl || !anchorSourceEl || !focusSourceEl) return;
 
-    const aDisplayOffset = getDisplayOffsetInLine(anchorContentEl, sel.anchorNode!, sel.anchorOffset);
-    const fDisplayOffset = getDisplayOffsetInLine(focusContentEl, sel.focusNode!, sel.focusOffset);
+    const anchorIndex = Number(anchorLineEl.dataset.lineIndex);
+    const focusIndex = Number(focusLineEl.dataset.lineIndex);
+    if (!Number.isInteger(anchorIndex) || !Number.isInteger(focusIndex)) return;
 
-    let startIdx = aIdx;
-    let startDisp = aDisplayOffset;
-    let endIdx = fIdx;
-    let endDisp = fDisplayOffset;
-    if (aIdx > fIdx || (aIdx === fIdx && aDisplayOffset > fDisplayOffset)) {
-      startIdx = fIdx; startDisp = fDisplayOffset; endIdx = aIdx; endDisp = aDisplayOffset;
+    const anchorDisplay = getDisplayOffsetInLine(anchorSourceEl, selection.anchorNode!, selection.anchorOffset);
+    const focusDisplay = getDisplayOffsetInLine(focusSourceEl, selection.focusNode!, selection.focusOffset);
+
+    let startIndex = anchorIndex;
+    let startDisplay = anchorDisplay;
+    let endIndex = focusIndex;
+    let endDisplay = focusDisplay;
+    if (anchorIndex > focusIndex || (anchorIndex === focusIndex && anchorDisplay > focusDisplay)) {
+      startIndex = focusIndex;
+      startDisplay = focusDisplay;
+      endIndex = anchorIndex;
+      endDisplay = anchorDisplay;
     }
 
-    const startSrc = mapDisplayOffsetToSourceIndex(lines[startIdx] ?? "", startDisp);
-    const endSrc = mapDisplayOffsetToSourceIndex(lines[endIdx] ?? "", endDisp);
+    const currentLines = linesRef.current;
+    const startLine = currentLines[startIndex] ?? "";
+    const endLine = currentLines[endIndex] ?? "";
+    const startIsLineStart = startDisplay === 0;
+    const endIsLineEnd = endDisplay >= getDisplayContentLength(endLine);
+    const startSource = mapDisplayOffsetToSourceIndex(startLine, startDisplay);
+    const endSource = endIsLineEnd ? endLine.length : mapDisplayOffsetToSourceIndex(endLine, endDisplay);
 
-    setLines((prev) => {
+    const nextLines = commitLines((prev) => {
       const next = [...prev];
-      if (startIdx === endIdx) {
-        const line = next[startIdx] ?? "";
-        const fullDispLen = getDisplayContentLength(line);
-        const startIsLineStart = startDisp === 0;
-        const endIsLineEnd = endDisp === fullDispLen;
+      if (startIndex === endIndex) {
         if (startIsLineStart && endIsLineEnd) {
-          next.splice(startIdx, 1);
+          next.splice(startIndex, 1);
         } else {
-          const s = startIsLineStart ? 0 : startSrc;
-          const e = endIsLineEnd ? line.length : endSrc;
-          next[startIdx] = line.slice(0, s) + line.slice(e);
+          const current = next[startIndex] ?? "";
+          next[startIndex] = current.slice(0, startSource) + current.slice(endSource);
         }
-        return next.length === 0 ? [""] : next;
+        return next;
       }
 
-      const startLine = next[startIdx] ?? "";
-      const endLine = next[endIdx] ?? "";
-      const startIsLineStart = startDisp === 0;
-      const endFullDispLen = getDisplayContentLength(endLine);
-      const endIsLineEnd = endDisp === endFullDispLen;
-      const startCut = startIsLineStart ? 0 : startSrc;
-      const endCut = endIsLineEnd ? endLine.length : endSrc;
-      const merged = startLine.slice(0, startCut) + endLine.slice(endCut);
-      next.splice(startIdx, endIdx - startIdx + 1, merged);
-      return next.length === 0 ? [""] : next;
+      const merged = startLine.slice(0, startSource) + endLine.slice(endSource);
+      next.splice(startIndex, endIndex - startIndex + 1, merged);
+      return next;
     });
 
-    cursorPositionRef.current = mapDisplayOffsetToSourceIndex(lines[startIdx] ?? "", startDisp);
-    setActiveLineIndex(Math.min(startIdx, lines.length - 1));
-    setIsDirty(true);
+    requestFocus(Math.min(startIndex, nextLines.length - 1), startSource);
   };
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Backspace" && e.key !== "Delete") return;
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return;
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (readOnly || (event.key !== "Backspace" && event.key !== "Delete")) return;
+      const selection = window.getSelection();
       const container = contentRef.current;
-      if (!container) return;
-      if (!container.contains(sel.anchorNode) || !container.contains(sel.focusNode)) return;
-      e.preventDefault();
+      if (!selection || selection.isCollapsed || !container) return;
+      if (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+      event.preventDefault();
       deleteCurrentSelection();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [lines]);
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => window.removeEventListener("keydown", onWindowKeyDown);
+  }, [readOnly]);
 
   return (
-    <div className={cx(className, classNames?.root)} style={{ position: "relative", display: "flex", flexDirection: "column" }}>
+    <div
+      className={cx(className, classNames?.root)}
+      style={{ position: "relative", display: "flex", flexDirection: "column", ...styles?.root }}
+    >
       <div
         ref={contentRef}
         className={cx(classNames?.content)}
-        style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: "none" }}
-        onClick={(e) => {
+        style={{ display: "flex", flexDirection: "column", maxWidth: "none", ...styles?.content }}
+        onClick={(event) => {
           if (readOnly) return;
-          if (e.currentTarget === e.target && activeLineIndex !== null) {
-            setActiveLineIndex(null);
-          }
+          if (event.currentTarget === event.target && activeLineIndex !== null) setActiveLineIndex(null);
         }}
-        onMouseDownCapture={(e) => {
+        onMouseDownCapture={(event) => {
           if (readOnly) return;
-          const target = e.target as HTMLElement;
-          const insideTextarea = !!target.closest("textarea");
-          const insideLineContent = !!target.closest('[data-role="line-content"]');
-          if (!insideTextarea && !insideLineContent && activeLineIndex !== null) {
-            setActiveLineIndex(null);
+          const target = event.target as HTMLElement;
+          const lineEl = target.closest("[data-line-index]") as HTMLElement | null;
+          if (!lineEl) {
+            selectionAnchorRef.current = null;
+            return;
           }
+          const index = Number(lineEl.dataset.lineIndex);
+          if (!Number.isInteger(index)) return;
+
           isSelectingRef.current = true;
-          draggingFromTextareaRef.current = !!insideTextarea;
           bridgingSelectionRef.current = false;
-          const lineEl = target.closest('[data-line-index]') as HTMLElement | null;
-          const contentEl = target.closest('[data-role="line-content"]') as HTMLElement | null;
-          if (lineEl && contentEl) {
-            const idxAttr = lineEl.getAttribute("data-line-index");
-            const idx = idxAttr ? parseInt(idxAttr, 10) : NaN;
-            if (!Number.isNaN(idx)) {
-              const sel = window.getSelection();
-              if (sel && sel.anchorNode) {
-                try {
-                  const range = document.createRange();
-                  range.selectNodeContents(contentEl);
-                  range.setEnd(sel.anchorNode, sel.anchorOffset);
-                  const offset = range.toString().length;
-                  selectionAnchorRef.current = { index: idx, offset };
-                } catch { // If range calculation fails, default to start of line.
-                  selectionAnchorRef.current = { index: idx, offset: 0 };
-                }
-              } else {
-                selectionAnchorRef.current = { index: idx, offset: 0 };
-              }
-            }
+          const textarea = target.closest("textarea") as HTMLTextAreaElement | null;
+          draggingFromTextareaRef.current = !!textarea;
+
+          if (textarea) {
+            selectionAnchorRef.current = {
+              index,
+              displayOffset: mapSourceIndexToDisplayOffset(linesRef.current[index] ?? "", textarea.selectionStart ?? 0),
+            };
+            return;
+          }
+
+          const sourceEl = target.closest('[data-role="source-content"]') as HTMLElement | null;
+          if (sourceEl) {
+            selectionAnchorRef.current = {
+              index,
+              displayOffset: getClickDisplayOffset(sourceEl, event.clientX, event.clientY),
+            };
           } else {
             selectionAnchorRef.current = null;
           }
         }}
-        onMouseMoveCapture={(e) => {
-          if (readOnly) return;
-    if (!isSelectingRef.current || !draggingFromTextareaRef.current) return;
-          const target = e.target as HTMLElement;
-          const insideTextarea = !!target.closest("textarea");
-          if (!insideTextarea && (e.buttons & 1) === 1) {
-            setActiveLineIndex(null);
-            const anchor = selectionAnchorRef.current;
-            if (anchor) {
-              const { index, offset } = anchor;
-              const endLineEl = target.closest('[data-line-index]') as HTMLElement | null;
-              const endContentEl = target.closest('[data-role="line-content"]') as HTMLElement | null;
-              if (endLineEl && endContentEl) {
-                const idxAttr = endLineEl.getAttribute("data-line-index");
-                const endIdx = idxAttr ? parseInt(idxAttr, 10) : index;
-                const endOffset = getClickDisplayOffset(endContentEl, e.clientX, e.clientY);
-                setSelectionFromDisplayPoints(index, offset, endIdx, endOffset);
-                bridgingSelectionRef.current = true;
-              }
+        onMouseMoveCapture={(event) => {
+          if (readOnly || !isSelectingRef.current || !draggingFromTextareaRef.current || (event.buttons & 1) !== 1) return;
+          const target = event.target as HTMLElement;
+          if (target.closest("textarea")) return;
+          const anchor = selectionAnchorRef.current;
+          const endLineEl = target.closest("[data-line-index]") as HTMLElement | null;
+          const endSourceEl = target.closest('[data-role="source-content"]') as HTMLElement | null;
+          if (!anchor || !endLineEl || !endSourceEl) return;
+
+          const endIndex = Number(endLineEl.dataset.lineIndex);
+          if (!Number.isInteger(endIndex)) return;
+          const endOffset = getClickDisplayOffset(endSourceEl, event.clientX, event.clientY);
+          setActiveLineIndex(null);
+          bridgingSelectionRef.current = true;
+          draggingFromTextareaRef.current = false;
+          setTimeout(() => {
+            if (anchor.index <= endIndex) {
+              setSelectionFromDisplayPoints(anchor.index, anchor.displayOffset, endIndex, endOffset);
+            } else {
+              setSelectionFromDisplayPoints(endIndex, endOffset, anchor.index, anchor.displayOffset);
             }
-            draggingFromTextareaRef.current = false;
-          }
+          }, 0);
         }}
-        onMouseUp={(e) => {
+        onMouseUp={() => {
           if (readOnly) return;
-          const sel = window.getSelection();
-          if (bridgingSelectionRef.current && sel && sel.isCollapsed) {
-            const target = e.target as HTMLElement;
-            const lineEl = target.closest('[data-line-index]') as HTMLElement | null;
-            const contentEl = target.closest('[data-role="line-content"]') as HTMLElement | null;
-            if (lineEl && contentEl) {
-              const idxAttr = lineEl.getAttribute("data-line-index");
-              const idx = idxAttr ? parseInt(idxAttr, 10) : null;
-              if (idx !== null) {
-                const off = getClickDisplayOffset(contentEl, e.clientX, e.clientY);
-                cursorPositionRef.current = mapDisplayOffsetToSourceIndex(lines[idx] ?? "", off);
-                setActiveLineIndex(idx);
-              }
-            }
-          }
           isSelectingRef.current = false;
           selectionAnchorRef.current = null;
           draggingFromTextareaRef.current = false;
           bridgingSelectionRef.current = false;
         }}
       >
-        <div>
-          {lines.map((line, idx) => (
-            <EditorLine
-              key={idx}
-              index={idx}
-              line={line}
-              isActive={activeLineIndex === idx}
-              onUpdate={(e) => handleLineChange(idx, e.target.value)}
-              onFocus={() => setActiveLineIndex(idx)}
-              onKeyDown={(e) => handleKeyDown(e, idx)}
-              onPaste={(e) => handlePaste(e, idx)}
-              cursorPositionRef={cursorPositionRef}
-              isSelectingRef={isSelectingRef}
-              classNames={classNames}
-              renderLine={renderLine}
-              extensionsPrefix={extensionsWithPrefix}
-              extensionsSuffix={extensionsWithSuffix}
-            />
-          ))}
-        </div>
+        {lines.map((line, index) => (
+          <EditorLine
+            key={index}
+            index={index}
+            line={line}
+            isActive={activeLineIndex === index}
+            readOnly={readOnly}
+            focusVersion={focusVersion}
+            onUpdate={(event) => handleLineChange(index, event.target.value)}
+            onActivate={(caret) => requestFocus(index, caret)}
+            onKeyDown={(event) => handleKeyDown(event, index)}
+            onPaste={(event) => handlePaste(event, index)}
+            cursorPositionRef={cursorPositionRef}
+            isSelectingRef={isSelectingRef}
+            classNames={classNames}
+            styles={styles}
+            renderLine={renderLine}
+            extensionsPrefix={extensionsWithPrefix}
+            extensionsSuffix={extensionsWithSuffix}
+          />
+        ))}
       </div>
     </div>
   );
