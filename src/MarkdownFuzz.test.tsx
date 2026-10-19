@@ -58,6 +58,16 @@ describe("deterministic adversarial Markdown fuzzing", () => {
     }
   });
 
+  it("bounds invalid cursor offsets instead of leaking undefined indexes", () => {
+    const line = "**bold** example";
+    for (const offset of [NaN, Infinity, -Infinity]) {
+      const value = mapDisplayOffsetToSourceIndex(line, offset);
+      expect(Number.isInteger(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(line.length);
+    }
+  });
+
   it("preserves display math containing a single dollar and following text", () => {
     const markdown = [
       "$$", "a + $b$ + c", "$$", "",
