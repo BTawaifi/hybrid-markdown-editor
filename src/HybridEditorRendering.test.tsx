@@ -47,6 +47,18 @@ describe("hybrid rendering matches the renderer", () => {
     expect(screen.getByTestId("value").textContent).toBe("| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 5 |");
   });
 
+  it("renders h5/h6, plus bullets, quotes, rules and one-line display math like the renderer", () => {
+    const value = ["##### Five", "###### Six", "+ plus", "", "> quote", "> > nested", "", "***", "", "$$ x^2 $$"].join("\n");
+    const { container } = render(<HybridMarkdownEditor value={value} readOnly />);
+    expect(container.querySelector(".hme-line-h5")?.textContent).toBe("Five");
+    expect(container.querySelector(".hme-line-h6")?.textContent).toBe("Six");
+    expect(container.querySelector('[data-role="line-marker"]')?.textContent).toBe("•");
+    expect(container.querySelectorAll("blockquote blockquote")).toHaveLength(1);
+    expect(container.querySelectorAll("hr")).toHaveLength(1);
+    expect(container.querySelectorAll(".hme-math-block math")).toHaveLength(1);
+    expect(container.textContent).not.toMatch(/#####|> >|\*\*\*|\$\$/);
+  });
+
   it("lets links, copy buttons and widget inputs work without starting an edit", () => {
     const value = ["See [docs](https://example.com)", "", fence + "choice", "- A | First", "- B | Second", fence, "", fence + "js", "x()", fence].join("\n");
     render(<Controlled initial={value} widgets />);
@@ -68,6 +80,8 @@ describe("hybrid rendering matches the renderer", () => {
       { start: 2, end: 3 },
       { start: 5, end: 7 },
     ]);
+    // A paragraph glued to an underline is one heading block, never a rule (CommonMark).
+    expect(findMarkdownBlocks(["one", "two", "-----", "", "***"])).toEqual([{ start: 0, end: 2 }, { start: 4, end: 4 }]);
     // Indented code after a blank line is a block; indented list continuation is not.
     expect(findMarkdownBlocks(["intro", "", "    code()", "", "    more()", "", "after"])).toEqual([{ start: 2, end: 4 }]);
     expect(findMarkdownBlocks(["- item", "", "    continued"])).toEqual([]);
@@ -111,5 +125,54 @@ describe("hybrid keyboard behaviour", () => {
     fireEvent.select(again);
     fireEvent.keyDown(again, { key: "Backspace" });
     expect(screen.getByTestId("value").textContent).toBe("- firstsecond");
+  });
+});
+
+describe("task checkboxes", () => {
+  it("toggles task markers, widget rows and preview checkboxes in the source", () => {
+    const value = ["- [ ] write", "", fence + "checklist", "title: Packing", "- [ ] Tent | 1", fence].join("\n");
+    const { container } = render(<Controlled initial={value} widgets />);
+    fireEvent.click(container.querySelector('[data-role="line-marker"] input')!);
+    expect(screen.getByTestId("value").textContent).toContain("- [x] write");
+    expect(screen.queryByRole("textbox")).toBeNull();
+    fireEvent.click(container.querySelector(".hme-w-check")!);
+    expect(screen.getByTestId("value").textContent).toContain("- [x] Tent | 1");
+    expect(container.querySelector(".hme-w-count")?.textContent).toBe("1/1");
+  });
+
+  it("toggles source from preview mode and ignores toggles when read-only", () => {
+    function Preview({ readOnly }: { readOnly?: boolean }) {
+      const [value, setValue] = useState("> - [ ] quoted task");
+      return <><HybridMarkdownEditor value={value} onChange={setValue} presentation="preview" readOnly={readOnly} /><pre data-testid="v">{value}</pre></>;
+    }
+    const view = render(<Preview />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Task completed" }));
+    expect(screen.getByTestId("v").textContent).toBe("> - [x] quoted task");
+    view.unmount();
+    render(<Preview readOnly />);
+    const box = screen.getByRole("checkbox", { name: "Task completed" }) as HTMLInputElement;
+    fireEvent.click(box);
+    expect(box.checked).toBe(false);
+    expect(screen.getByTestId("v").textContent).toBe("> - [ ] quoted task");
+  });
+});
+
+describe("inline renderer fixes found by the kitchen-sink pass", () => {
+  it("closes emphasis inside asterisk runs, links bare URLs, keeps snake_case literal", () => {
+    const md = "***both*** and **bold *inner*** then https://bare.example.com/x. and my_var_name and _em_";
+    const { container } = render(<HybridMarkdownEditor value={md} readOnly />);
+    const source = container.querySelector('[data-role="source-content"]')!;
+    expect(source.textContent).toBe("both and bold inner then https://bare.example.com/x. and my_var_name and em");
+    expect(source.querySelector("strong em")?.textContent).toBe("both");
+    expect(source.querySelectorAll("strong")[1].querySelector("em")?.textContent).toBe("inner");
+    expect(source.querySelector("a")?.getAttribute("href")).toBe("https://bare.example.com/x");
+    expect(source.querySelectorAll("em")).toHaveLength(3);
+  });
+
+  it("gives heading lines heading semantics and indents continuation lines", () => {
+    const { container } = render(<HybridMarkdownEditor value={"## Section\n- item\n\n  continued"} readOnly />);
+    expect(screen.getByRole("heading", { level: 2, name: "Section" })).toBeTruthy();
+    const previews = container.querySelectorAll('[data-role="line-preview"]');
+    expect((previews[3] as HTMLElement).style.paddingLeft).toBe("16px");
   });
 });

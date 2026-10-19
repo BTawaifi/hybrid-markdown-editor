@@ -1,4 +1,4 @@
-import React, { useId, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 
 /**
  * Widget fences (opt-in via the renderer's `widgets` prop): small line-based blocks that
@@ -17,26 +17,53 @@ import React, { useId, useState } from "react";
 export const widgetKinds = new Set(["flow", "checklist", "roadmap", "cards", "choice", "callout"]);
 
 type Inline = (text: string) => React.ReactNode;
-type Item = { checked: boolean; cells: string[] };
+/** `line`: index of the item's line within the fence body. */
+type Item = { checked: boolean; cells: string[]; line: number };
 type Spec = { meta: Record<string, string>; items: Item[] };
 
 function parse(source: string): Spec {
   const meta: Record<string, string> = {};
   const items: Item[] = [];
-  for (const raw of source.split("\n")) {
+  source.split("\n").forEach((raw, lineIndex) => {
     const line = raw.trim();
-    if (!line) continue;
+    if (!line) return;
     const header = !items.length && line.match(/^(title|prompt|unit):\s*(.*)$/i);
-    if (header) { meta[header[1].toLowerCase()] = header[2]; continue; }
+    if (header) { meta[header[1].toLowerCase()] = header[2]; return; }
     const bullet = line.match(/^[-*+]\s+(?:\[([ xX])\]\s+)?(.*)$/);
     const body = bullet ? bullet[2] : line;
-    items.push({ checked: bullet?.[1]?.toLowerCase() === "x", cells: body.split(/\s\|(?=\s)/).map(cell => cell.trim()) });
-  }
+    items.push({ checked: bullet?.[1]?.toLowerCase() === "x", cells: body.split(/\s\|(?=\s)/).map(cell => cell.trim()), line: lineIndex });
+  });
   return { meta, items };
 }
 
-const Check = ({ checked }: { checked: boolean }) =>
-  <input type="checkbox" className="hme-w-check" checked={checked} readOnly aria-label={checked ? "Done" : "Not done"} />;
+type Toggle = (line: number, checked: boolean) => void;
+
+/**
+ * A checkbox that reports toggles through `onToggle` (source-controlled), or toggles locally
+ * when no handler is given. Local state resyncs when the source value changes.
+ */
+export function ToggleBox({ checked, onToggle, className, label }: {
+  checked: boolean; onToggle?: (checked: boolean) => void; className: string; label?: string;
+}) {
+  const [local, setLocal] = useState(checked);
+  useEffect(() => setLocal(checked), [checked]);
+  const value = onToggle ? checked : local;
+  return <input type="checkbox" className={className} checked={value} aria-label={label ?? (value ? "Done" : "Not done")}
+    onChange={event => (onToggle ? onToggle(event.target.checked) : setLocal(event.target.checked))} />;
+}
+
+/** Checked state for a widget's rows: from the source when `toggle` is given, else local. */
+function useChecks(items: Item[], toggle?: Toggle) {
+  const initial = items.map(item => item.checked).join();
+  const [local, setLocal] = useState(() => items.map(item => item.checked));
+  // Resync only when the source's checked values change, not on every new items array.
+  useEffect(() => setLocal(items.map(item => item.checked)), [initial]);
+  const values = toggle ? items.map(item => item.checked) : local;
+  const set = (index: number, checked: boolean) => toggle
+    ? toggle(items[index].line, checked)
+    : setLocal(current => current.map((value, i) => (i === index ? checked : value)));
+  return { values, set, done: values.filter(Boolean).length };
+}
 
 /** Row text: main line plus an optional muted detail line underneath. */
 const RowText = ({ children, detail, inline }: { children: React.ReactNode; detail?: string; inline: Inline }) =>
@@ -60,8 +87,8 @@ function Flow({ spec, info, inline }: { spec: Spec; info: string; inline: Inline
   </div>;
 }
 
-function Checklist({ spec, inline }: { spec: Spec; inline: Inline }) {
-  const done = spec.items.filter(item => item.checked).length;
+function Checklist({ spec, inline, toggle }: { spec: Spec; inline: Inline; toggle?: Toggle }) {
+  const { values, set, done } = useChecks(spec.items, toggle);
   return <div className="hme-widget">
     <div className="hme-w-head">
       <p className="hme-w-title">{inline(spec.meta.title ?? "Checklist")}</p>
@@ -69,7 +96,7 @@ function Checklist({ spec, inline }: { spec: Spec; inline: Inline }) {
     </div>
     <ul className="hme-w-rows">
       {spec.items.map((item, i) => <li key={i}>
-        <Check checked={item.checked} />
+        <ToggleBox className="hme-w-check" checked={values[i]} onToggle={checked => set(i, checked)} />
         <RowText detail={item.cells[2]} inline={inline}>{inline(item.cells[0])}</RowText>
         {item.cells[1] && <span className="hme-w-value">{inline(item.cells[1])}</span>}
       </li>)}
@@ -77,9 +104,9 @@ function Checklist({ spec, inline }: { spec: Spec; inline: Inline }) {
   </div>;
 }
 
-function Roadmap({ spec, inline }: { spec: Spec; inline: Inline }) {
+function Roadmap({ spec, inline, toggle }: { spec: Spec; inline: Inline; toggle?: Toggle }) {
   const total = spec.items.length;
-  const done = spec.items.filter(item => item.checked).length;
+  const { values, set, done } = useChecks(spec.items, toggle);
   const digits = String(total).length < 2 ? 2 : String(total).length;
   return <div className="hme-widget">
     <div className="hme-w-head">
@@ -93,7 +120,7 @@ function Roadmap({ spec, inline }: { spec: Spec; inline: Inline }) {
     <Progress done={done} total={total} />
     <ol className="hme-w-rows">
       {spec.items.map((item, i) => <li key={i}>
-        <Check checked={item.checked} />
+        <ToggleBox className="hme-w-check" checked={values[i]} onToggle={checked => set(i, checked)} />
         <RowText detail={item.cells[2]} inline={inline}><span className="hme-w-num">{String(i + 1).padStart(digits, "0")}.</span> {inline(item.cells[0])}</RowText>
         {item.cells[1] && <span className="hme-w-tag">{inline(item.cells[1])}</span>}
       </li>)}
@@ -160,14 +187,14 @@ function renderCallout(source: string, info: string, inline: Inline): React.Reac
 }
 
 /** Renders a widget fence, or null when the block has no items (caller falls back to code). */
-export function renderWidget(kind: string, info: string, source: string, inline: Inline): React.ReactNode | null {
+export function renderWidget(kind: string, info: string, source: string, inline: Inline, toggle?: Toggle): React.ReactNode | null {
   if (kind === "callout") return renderCallout(source, info, inline);
   const spec = parse(source);
   if (!spec.items.length) return null;
   switch (kind) {
     case "flow": return <Flow spec={spec} info={info} inline={inline} />;
-    case "checklist": return <Checklist spec={spec} inline={inline} />;
-    case "roadmap": return <Roadmap spec={spec} inline={inline} />;
+    case "checklist": return <Checklist spec={spec} inline={inline} toggle={toggle} />;
+    case "roadmap": return <Roadmap spec={spec} inline={inline} toggle={toggle} />;
     case "cards": return <Cards spec={spec} info={info} inline={inline} />;
     case "choice": return <Choice spec={spec} inline={inline} />;
     default: return null;

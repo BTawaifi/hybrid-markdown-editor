@@ -22,7 +22,7 @@ type ListMeta = {
   number?: number;
 };
 
-export type LineType = "h1" | "h2" | "h3" | "h4" | "li" | "blockquote" | "p";
+export type LineType = "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li" | "blockquote" | "p";
 
 export type EditorExtension = {
   onKeyDown?: (
@@ -99,15 +99,17 @@ const H1_REGEX = /^#{1}\s/;
 const H2_REGEX = /^#{2}\s/;
 const H3_REGEX = /^#{3}\s/;
 const H4_REGEX = /^#{4}\s/;
-const LI_TASK_REGEX = /^\s*[-*]\s\[[ xX]\]\s/;
-const LI_UL_REGEX = /^\s*[-*]\s/;
+const H5_REGEX = /^#{5}\s/;
+const H6_REGEX = /^#{6}\s/;
+const LI_TASK_REGEX = /^\s*[-*+]\s\[[ xX]\]\s/;
+const LI_UL_REGEX = /^\s*[-*+]\s/;
 const LI_OL_REGEX = /^\s*\d+\.\s/;
 const BLOCKQUOTE_REGEX = /^\s*>\s/;
-const MARKDOWN_PREFIX_REGEX = /^(?:#{1,4}\s|\s*[-*]\s\[[ xX]\]\s|\s*[-*]\s|\s*\d+\.\s|\s*>\s)/;
+const MARKDOWN_PREFIX_REGEX = /^(?:#{1,6}\s|\s*[-*+]\s\[[ xX]\]\s|\s*[-*+]\s|\s*\d+\.\s|\s*>\s)/;
 const BOLD_TOKEN_REGEX = /\*\*([^*]+)\*\*/g;
 const INDENT_REGEX = /^(\s*)/;
-const LIST_TASK_MATCH_REGEX = /^(\s*)([-*])\s\[([ xX])\]\s/;
-const LIST_UL_MATCH_REGEX = /^(\s*)([-*])\s/;
+const LIST_TASK_MATCH_REGEX = /^(\s*)([-*+])\s\[([ xX])\]\s/;
+const LIST_UL_MATCH_REGEX = /^(\s*)([-*+])\s/;
 const LIST_OL_MATCH_REGEX = /^(\s*)(\d+)\.\s/;
 const LIST_BQ_MATCH_REGEX = /^(\s*)>\s/;
 
@@ -116,6 +118,8 @@ export const getMarkdownType = (line: string): LineType => {
   if (H2_REGEX.test(line)) return "h2";
   if (H3_REGEX.test(line)) return "h3";
   if (H4_REGEX.test(line)) return "h4";
+  if (H5_REGEX.test(line)) return "h5";
+  if (H6_REGEX.test(line)) return "h6";
   if (LI_TASK_REGEX.test(line)) return "li";
   if (LI_UL_REGEX.test(line)) return "li";
   if (LI_OL_REGEX.test(line)) return "li";
@@ -325,6 +329,13 @@ const FENCE_OPEN_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
 const TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
 const SETEXT_REGEX = /^\s{0,3}(=+|-+)\s*$/;
 const INDENTED_CODE_REGEX = /^(?: {4}|\t)(?=\s*\S)/;
+const RULE_REGEX = /^\s{0,3}(?:\*\s*){3,}$|^\s{0,3}(?:-\s*){3,}$|^\s{0,3}(?:_\s*){3,}$/;
+/** Text that continues a paragraph (not a heading, list, quote, fence, rule, underline or math). */
+const isParagraphLine = (line: string): boolean => {
+  const trimmed = line.trim();
+  return !!trimmed && !MARKDOWN_PREFIX_REGEX.test(line) && !FENCE_OPEN_REGEX.test(line) && !SETEXT_REGEX.test(line)
+    && !RULE_REGEX.test(line) && !trimmed.startsWith("$$") && !trimmed.startsWith("\\[") && !/^\s{0,3}>/.test(line);
+};
 
 /**
  * Multi-line constructs that only render correctly as a whole: fenced code (including widget
@@ -332,6 +343,13 @@ const INDENTED_CODE_REGEX = /^(?: {4}|\t)(?=\s*\S)/;
  */
 export const findMarkdownBlocks = (lines: string[]): Block[] => {
   const blocks: Block[] = [];
+  // Last non-blank line before each index, computed once (keeps detection linear).
+  const previousContentAt: string[] = [];
+  let lastContent = "";
+  lines.forEach((l, i) => {
+    previousContentAt[i] = lastContent;
+    if (l.trim()) lastContent = l;
+  });
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const fence = line.match(FENCE_OPEN_REGEX);
@@ -344,6 +362,30 @@ export const findMarkdownBlocks = (lines: string[]): Block[] => {
       continue;
     }
     const trimmed = line.trim();
+    // Setext heading: a paragraph (one or more lines) directly followed by === or --- is one
+    // heading, as in CommonMark; the underline is never a rule then.
+    if (isParagraphLine(line) && !INDENTED_CODE_REGEX.test(line) && !isParagraphLine(lines[i - 1] ?? "")) {
+      let end = i;
+      while (end + 1 < lines.length && isParagraphLine(lines[end + 1])) end += 1;
+      if (SETEXT_REGEX.test(lines[end + 1] ?? "")) {
+        blocks.push({ start: i, end: end + 1 });
+        i = end + 1;
+        continue;
+      }
+    }
+    // Quotes (with nesting, lists and code inside) render as one block, like the renderer.
+    if (BLOCKQUOTE_REGEX.test(line) || /^\s{0,3}>$/.test(line)) {
+      let end = i;
+      while (end + 1 < lines.length && (BLOCKQUOTE_REGEX.test(lines[end + 1]) || /^\s{0,3}>$/.test(lines[end + 1]))) end += 1;
+      blocks.push({ start: i, end });
+      i = end;
+      continue;
+    }
+    // Display math on one line ($$ x $$, \[ x \]) and thematic breaks are one-line blocks.
+    if ((trimmed.startsWith("$$") && trimmed.length > 4 && trimmed.endsWith("$$")) || (trimmed.startsWith("\\[") && trimmed.endsWith("\\]") && trimmed.length > 4) || RULE_REGEX.test(line)) {
+      blocks.push({ start: i, end: i });
+      continue;
+    }
     const mathClose = trimmed === "$$" ? "$$" : trimmed === "\\[" ? "\\]" : null;
     if (mathClose) {
       let end = i + 1;
@@ -361,8 +403,8 @@ export const findMarkdownBlocks = (lines: string[]): Block[] => {
     }
     // Indented code: starts after a blank line, outside list content, and runs while lines stay
     // indented (blank lines inside are kept, trailing ones are not).
-    const previousContent = lines.slice(0, i).reverse().find((l) => l.trim()) ?? "";
-    if (INDENTED_CODE_REGEX.test(line) && !(lines[i - 1] ?? "").trim() && !LI_UL_REGEX.test(previousContent) && !LI_OL_REGEX.test(previousContent) && !INDENTED_CODE_REGEX.test(previousContent)) {
+    const previousContent = previousContentAt[i];
+    if (INDENTED_CODE_REGEX.test(line) && !(lines[i - 1] ?? "").trim() && !LI_UL_REGEX.test(previousContent) && !LI_OL_REGEX.test(previousContent)) {
       let end = i;
       for (let next = i + 1; next < lines.length; next += 1) {
         if (INDENTED_CODE_REGEX.test(lines[next])) end = next;
@@ -372,10 +414,6 @@ export const findMarkdownBlocks = (lines: string[]): Block[] => {
       i = end;
       continue;
     }
-    if (trimmed && !MARKDOWN_PREFIX_REGEX.test(line) && SETEXT_REGEX.test(lines[i + 1] ?? "") && !(lines[i - 1] ?? "").trim()) {
-      blocks.push({ start: i, end: i + 1 });
-      i += 1;
-    }
   }
   return blocks;
 };
@@ -384,7 +422,7 @@ const editorCss = [
   ".hme-editor{line-height:1.625}.hme-editor:focus-visible{outline:2px solid var(--hme-link);outline-offset:4px;border-radius:6px}",
   ".hme-editor .hme-line{min-height:1.625em}.hme-editor .hme-line [data-role=source-content]{flex:1;min-width:0;overflow-wrap:anywhere}",
   ".hme-editor .hme-line-h1{font-size:1.25em;font-weight:600;line-height:1.4;margin-top:.5em}.hme-editor .hme-line-h2{font-size:1.125em;font-weight:600;margin-top:.4em}",
-  ".hme-editor .hme-line-h3,.hme-editor .hme-line-h4{font-weight:600;margin-top:.3em}.hme-editor .hme-line [data-role=line-marker]{color:var(--hme-muted);font-variant-emoji:text}",
+  ".hme-editor .hme-line-h3,.hme-editor .hme-line-h4,.hme-editor .hme-line-h5,.hme-editor .hme-line-h6{font-weight:600;margin-top:.3em}.hme-editor .hme-checkbox{margin:0;vertical-align:-.1em}.hme-editor .hme-checkbox:disabled{opacity:1}.hme-editor .hme-line [data-role=line-marker]{color:var(--hme-muted);font-variant-emoji:text}",
   ".hme-editor .hme-line-blockquote{color:var(--hme-muted)}.hme-editor textarea{font:inherit;color:inherit;letter-spacing:inherit;line-height:inherit}",
   ".hme-editor .hme-line-raw{font:.875em/1.7 ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;color:var(--hme-muted);white-space:pre-wrap}",
   ".hme-editor .hme-block{cursor:text}.hme-editor .hme-block>:first-child{margin-top:0}.hme-editor .hme-block+.hme-line{margin-top:.25em}",
@@ -393,10 +431,13 @@ const editorCss = [
 
 /** Controls inside rendered content (links, copy buttons, widget inputs) keep their own behaviour. */
 const isInteractiveTarget = (target: EventTarget): boolean =>
-  !!(target as HTMLElement).closest?.("a,button,input,label,select,textarea,summary");
+  !!(target as HTMLElement).closest?.("a,button,input,label,select,textarea,summary,[role=checkbox]");
+
+/** Task checkbox on a list/quote line, including widget rows like "- [ ] item | value". */
+const TASK_TOGGLE_REGEX = /^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])/;
 
 /** Which source line a click inside a rendered block belongs to. */
-const lineFromBlockClick = (target: HTMLElement, block: Block, lines: string[]): number => {
+const lineFromBlockClick = (target: HTMLElement, block: Block, lines: string[], clientY?: number): number => {
   const row = target.closest("tr");
   if (row) {
     const inHead = !!row.closest("thead");
@@ -404,19 +445,25 @@ const lineFromBlockClick = (target: HTMLElement, block: Block, lines: string[]):
     return Math.min(block.end, inHead ? block.start : block.start + 2 + bodyIndex);
   }
   if (FENCE_OPEN_REGEX.test(lines[block.start] ?? "")) return Math.min(block.end, block.start + 1);
+  const box = (target.closest(".hme-block") as HTMLElement | null)?.getBoundingClientRect();
+  if (box && box.height > 0 && clientY !== undefined) {
+    const ratio = Math.max(0, Math.min(0.999, (clientY - box.top) / box.height));
+    return block.start + Math.floor(ratio * (block.end - block.start + 1));
+  }
   return block.start;
 };
 
-const EditorLine: React.FC<{
+const EditorLineView: React.FC<{
   index: number;
   line: string;
   isActive: boolean;
   readOnly: boolean;
   focusVersion: number;
-  onUpdate: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  onActivate: (caret?: number | null) => void;
-  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
+  // Callbacks take the line index so the editor can pass the same functions to every line.
+  onUpdate: (index: number, e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onActivate: (index: number, caret?: number | null) => void;
+  onKeyDown: (index: number, e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPaste: (index: number, e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   cursorPositionRef: React.MutableRefObject<number | null>;
   isSelectingRef: React.MutableRefObject<boolean>;
   classNames?: HybridMarkdownEditorProps["classNames"];
@@ -427,6 +474,7 @@ const EditorLine: React.FC<{
   /** Line belongs to the block being edited: show its source as-is. */
   raw: boolean;
   renderOptions: MarkdownRenderOptions;
+  onToggleTask?: (index: number, checked: boolean) => void;
 }> = ({
   index,
   line,
@@ -446,12 +494,16 @@ const EditorLine: React.FC<{
   extensionsSuffix,
   raw,
   renderOptions,
+  onToggleTask,
 }) => {
   const type = getMarkdownType(line);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listMeta = type === "li" || type === "blockquote" ? getListMeta(line) : null;
   const marker = raw ? null : getListMarker(line);
-  const indentPx = listMeta && !raw ? Math.min(160, listMeta.indent.replace(/\t/g, "  ").length * 8) : 0;
+  // Lists indent by nesting; indented plain lines (list continuations) indent the same way.
+  const leading = raw ? "" : listMeta ? listMeta.indent : type === "p" ? (line.match(INDENT_REGEX)?.[1] ?? "") : "";
+  const indentPx = Math.min(160, leading.replace(/\t/g, "  ").length * 8);
+  const headingLevel = !raw && /^h[1-6]$/.test(type) ? Number(type[1]) : undefined;
 
   useEffect(() => {
     if (!isActive || readOnly || !textareaRef.current) return;
@@ -470,7 +522,7 @@ const EditorLine: React.FC<{
     if (!isSelectingRef.current && typeof caret === "number") {
       cursorPositionRef.current = caret;
     }
-    onUpdate(e);
+    onUpdate(index, e);
   };
 
   const typeClass = classNames?.lineTypes?.[type] || "";
@@ -512,8 +564,8 @@ const EditorLine: React.FC<{
             className={classNames?.textarea}
             value={line}
             onChange={handleChange}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
+            onKeyDown={(event) => onKeyDown(index, event)}
+            onPaste={(event) => onPaste(index, event)}
             onSelect={(e) => {
               const caret = (e.target as HTMLTextAreaElement).selectionStart ?? null;
               if (!isSelectingRef.current && typeof caret === "number") {
@@ -542,6 +594,8 @@ const EditorLine: React.FC<{
         <div
           data-role="line-preview"
           className={classNames?.preview}
+          role={headingLevel ? "heading" : undefined}
+          aria-level={headingLevel}
           style={{
             display: "flex",
             alignItems: "baseline",
@@ -557,11 +611,11 @@ const EditorLine: React.FC<{
             const target = event.target as HTMLElement;
             const sourceEl = target.closest('[data-role="source-content"]') as HTMLElement | null;
             if (!sourceEl) {
-              onActivate(line.length);
+              onActivate(index, line.length);
               return;
             }
             const offset = getClickDisplayOffset(sourceEl, event.clientX, event.clientY);
-            onActivate(line.trim() === "" ? 0 : sourceIndexAt(sourceEl, offset));
+            onActivate(index, line.trim() === "" ? 0 : sourceIndexAt(sourceEl, offset));
           }}
         >
           {extensionsPrefix?.map((ext, extIndex) => (
@@ -570,8 +624,21 @@ const EditorLine: React.FC<{
             </React.Fragment>
           ))}
           {marker ? (
-            <span data-role="line-marker" className={classNames?.marker} style={{ flex: "0 0 auto", userSelect: "none", ...styles?.marker }}>
-              {marker}
+            <span
+              data-role="line-marker"
+              className={classNames?.marker}
+              style={{ flex: "0 0 auto", userSelect: "none", ...styles?.marker }}
+            >
+              {listMeta?.kind === "task" ? (
+                <input
+                  type="checkbox"
+                  className="hme-checkbox"
+                  aria-label="Task completed"
+                  checked={marker === "\u2611"}
+                  disabled={!onToggleTask}
+                  onChange={(event) => onToggleTask?.(index, event.target.checked)}
+                />
+              ) : marker}
             </span>
           ) : null}
           {renderLine
@@ -587,6 +654,40 @@ const EditorLine: React.FC<{
     </div>
   );
 };
+
+/** Lines re-render only when their own props change (typing touches one line, not all). */
+const EditorLine = React.memo(EditorLineView);
+
+/** A rendered multi-line block; re-renders only when its source or options change. */
+const BlockView = React.memo(function BlockView({ start, end, markdown, readOnly, renderOptions, onActivateLine, onToggle }: {
+  start: number;
+  end: number;
+  markdown: string;
+  readOnly: boolean;
+  renderOptions: MarkdownRenderOptions;
+  onActivateLine: (target: HTMLElement, block: Block, clientY: number) => void;
+  onToggle: (index: number, checked: boolean) => void;
+}) {
+  const content = useMemo(
+    () => renderMarkdownBlocks(markdown, { ...renderOptions, onTaskToggle: (line, checked) => onToggle(start + line, checked) }),
+    [markdown, renderOptions, onToggle, start]
+  );
+  return (
+    <div
+      className="hme-block"
+      data-block-start={start}
+      data-block-end={end}
+      onMouseUp={(event) => {
+        if (readOnly || isInteractiveTarget(event.target)) return;
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed && selection.toString().length > 0) return;
+        onActivateLine(event.target as HTMLElement, { start, end }, event.clientY);
+      }}
+    >
+      {content}
+    </div>
+  );
+});
 
 export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   value,
@@ -699,11 +800,25 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     setFocusVersion((version) => version + 1);
   };
 
-  const renderOptions: MarkdownRenderOptions = {
-    renderMath: chatMarkdownProps?.renderMath,
-    highlightCode: chatMarkdownProps?.highlightCode,
-    widgets: chatMarkdownProps?.widgets,
+  /** Flip a task's [ ] / [x] in the source (task lists, widget rows, preview checkboxes). */
+  const toggleTask = (index: number, checked: boolean) => {
+    if (readOnly) return;
+    commitLines((prev) => {
+      const line = prev[index];
+      if (line === undefined || !TASK_TOGGLE_REGEX.test(line)) return prev;
+      const next = [...prev];
+      next[index] = line.replace(TASK_TOGGLE_REGEX, (_match, open: string, _state: string, close: string) => open + (checked ? "x" : " ") + close);
+      return next;
+    });
   };
+
+  const renderMath = chatMarkdownProps?.renderMath;
+  const highlightCode = chatMarkdownProps?.highlightCode;
+  const widgets = chatMarkdownProps?.widgets;
+  const renderOptions = useMemo<MarkdownRenderOptions>(
+    () => ({ renderMath, highlightCode, widgets }),
+    [renderMath, highlightCode, widgets]
+  );
 
   // Display <-> source mapping against the rendered DOM of a line (matches what the user sees).
   const lineSourceText = (index: number): { line: string; prefix: number } => {
@@ -1106,29 +1221,56 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [readOnly]);
 
+  // Stable callbacks for memoized lines/blocks; they always call the latest handlers.
+  const latest = useRef({ handleLineChange, handleKeyDown, handlePaste, requestFocus, toggleTask, readOnly, chatMarkdownProps });
+  latest.current = { handleLineChange, handleKeyDown, handlePaste, requestFocus, toggleTask, readOnly, chatMarkdownProps };
+  const stable = useMemo(() => ({
+    update: (index: number, event: React.ChangeEvent<HTMLTextAreaElement>) => latest.current.handleLineChange(index, event.target.value),
+    activate: (index: number, caret?: number | null) => latest.current.requestFocus(index, caret),
+    keyDown: (index: number, event: React.KeyboardEvent<HTMLTextAreaElement>) => latest.current.handleKeyDown(event, index),
+    paste: (index: number, event: React.ClipboardEvent<HTMLTextAreaElement>) => latest.current.handlePaste(event, index),
+    toggle: (index: number, checked: boolean) => {
+      if (latest.current.readOnly) return;
+      latest.current.toggleTask(index, checked);
+      latest.current.chatMarkdownProps?.onTaskToggle?.(index, checked);
+    },
+    activateInBlock: (target: HTMLElement, block: Block, clientY: number) => {
+      const index = lineFromBlockClick(target, block, linesRef.current, clientY);
+      latest.current.requestFocus(index, (linesRef.current[index] ?? "").length);
+    },
+  }), []);
+
   if (presentation === "preview" && (readOnly || activeLineIndex === null)) {
     return (
       <div className={cx(className, classNames?.root)} style={{ position: "relative", ...styles?.root }}>
         {!readOnly && <button type="button" aria-label="Edit Markdown" onClick={() => requestFocus(0, 0)} style={{ float: "right", cursor: "pointer", marginBottom: 12, padding: "6px 12px", borderRadius: 8, border: "1px solid currentColor", background: "transparent", color: "inherit" }}>Edit</button>}
-        <ChatMarkdownRenderer {...chatMarkdownProps} markdown={lines.join("\n")} />
+        <ChatMarkdownRenderer
+          {...chatMarkdownProps}
+          markdown={lines.join("\n")}
+          onTaskToggle={(line, checked) => {
+            if (readOnly) return; // controlled by the source, so read-only checkboxes stay put
+            toggleTask(line, checked);
+            chatMarkdownProps?.onTaskToggle?.(line, checked);
+          }}
+        />
       </div>
     );
   }
 
   const blocks = findMarkdownBlocks(lines);
   const blockAt = new Map(blocks.map((block) => [block.start, block]));
-  const inActiveBlock = (index: number) =>
-    activeLineIndex !== null && blocks.some((b) => b.start <= index && index <= b.end && b.start <= activeLineIndex && activeLineIndex <= b.end);
+  const activeBlock = activeLineIndex === null ? undefined : blocks.find((b) => b.start <= activeLineIndex && activeLineIndex <= b.end);
+  const inActiveBlock = (index: number) => !!activeBlock && activeBlock.start <= index && index <= activeBlock.end;
   const lineProps = (index: number, line: string, raw: boolean) => ({
     index,
     line,
     isActive: activeLineIndex === index,
     readOnly,
-    focusVersion,
-    onUpdate: (event: React.ChangeEvent<HTMLTextAreaElement>) => handleLineChange(index, event.target.value),
-    onActivate: (caret?: number | null) => requestFocus(index, caret),
-    onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => handleKeyDown(event, index),
-    onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => handlePaste(event, index),
+    focusVersion: activeLineIndex === index ? focusVersion : 0,
+    onUpdate: stable.update,
+    onActivate: stable.activate,
+    onKeyDown: stable.keyDown,
+    onPaste: stable.paste,
     cursorPositionRef,
     isSelectingRef,
     classNames,
@@ -1138,27 +1280,23 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     extensionsSuffix: extensionsWithSuffix,
     raw,
     renderOptions,
+    onToggleTask: readOnly ? undefined : stable.toggle,
   });
   const rows: React.ReactNode[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const block = blockAt.get(index);
     if (block && !inActiveBlock(index)) {
       rows.push(
-        <div
+        <BlockView
           key={`block-${index}`}
-          className="hme-block"
-          data-block-start={block.start}
-          data-block-end={block.end}
-          onMouseUp={(event) => {
-            if (readOnly || isInteractiveTarget(event.target)) return;
-            const selection = window.getSelection();
-            if (selection && !selection.isCollapsed && selection.toString().length > 0) return;
-            const target = lineFromBlockClick(event.target as HTMLElement, block, linesRef.current);
-            requestFocus(target, (linesRef.current[target] ?? "").length);
-          }}
-        >
-          {renderMarkdownBlocks(lines.slice(block.start, block.end + 1).join("\n"), renderOptions)}
-        </div>
+          start={block.start}
+          end={block.end}
+          markdown={lines.slice(block.start, block.end + 1).join("\n")}
+          readOnly={readOnly}
+          renderOptions={renderOptions}
+          onActivateLine={stable.activateInBlock}
+          onToggle={stable.toggle}
+        />
       );
       index = block.end;
       continue;

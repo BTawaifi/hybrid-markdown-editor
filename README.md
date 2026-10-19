@@ -35,6 +35,8 @@ const markdown = [
 
 Rich rendering is enabled by default. Advanced callers can still supply `renderMath(latex, display)` or `highlightCode(code, language)` overrides.
 
+Task checkboxes (task lists and checklist/roadmap widget rows) can be clicked. By default they toggle locally and progress counters update; pass `onTaskToggle(line, checked)` to persist the change, where `line` is the 0-based line index in `markdown`.
+
 **Security:** raw HTML is escaped rather than executed, code highlighting escapes source tokens, unknown code languages render as React text, and KaTeX operates with `trust: false`. This is not a complete CommonMark parser. Native MathML requires browser support; advanced nested block edge cases may need a standards-compliant Markdown AST.
 
 ## Core contract
@@ -76,6 +78,8 @@ Controlled value echoes from the parent do not cancel the pending local debounce
 - Tables, fenced code, display math, widget fences and underlined headings render as blocks; clicking one edits the source line you clicked, and the whole block shows its source while you edit inside it
 - Click-to-caret mapping that follows the rendered text
 - Keyboard accessible: the editor is focusable, Enter starts editing, Escape stops editing so Tab can leave
+- Task checkboxes (task lists, checklist/roadmap widget rows, preview mode) toggle `[ ]` / `[x]` in the source
+- Large documents stay responsive: only the edited line and changed blocks re-render
 - Optional chat-style full-document preview and standalone renderer
 - Distinct preview markers for unordered, ordered, checked, and unchecked task items
 - Extension hooks for keyboard, paste, prefix, and suffix behavior

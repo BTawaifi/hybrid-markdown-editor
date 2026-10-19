@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { codeLanguageLabel, detectCodeLanguage, renderBuiltInHighlight, renderBuiltInMath } from "./MarkdownIntegrations";
-import { renderWidget, widgetCss, widgetKinds } from "./ChatWidgets";
+import { ToggleBox, renderWidget, widgetCss, widgetKinds } from "./ChatWidgets";
 
 /**
  * A safe React renderer for chat-style Markdown with built-in math and syntax highlighting.
@@ -21,9 +21,16 @@ export type ChatMarkdownRendererProps = {
    * Off by default: that syntax is not standard Markdown, so the fences stay code blocks.
    */
   widgets?: boolean;
+  /**
+   * Called when a task checkbox (task list item, or checklist/roadmap widget row) is toggled.
+   * `line` is the 0-based index of that item's line in `markdown`. Without it, checkboxes
+   * toggle locally and the source is left unchanged.
+   */
+  onTaskToggle?: (line: number, checked: boolean) => void;
 };
 
-type RenderOptions = Pick<ChatMarkdownRendererProps, "renderMath" | "highlightCode" | "widgets">;
+/** `lineBase`: index of `lines[0]` in the original markdown (nested quotes, fences). */
+type RenderOptions = Pick<ChatMarkdownRendererProps, "renderMath" | "highlightCode" | "widgets" | "onTaskToggle"> & { lineBase?: number };
 
 // Compact chat typography (16/26px body, 600-weight compact headings,
 // 8px block rhythm, 24px-radius code surfaces with a language header, borderless tables).
@@ -51,9 +58,9 @@ const markdownCss = [
   ".hme-chat-markdown th,.hme-chat-markdown td{padding:8px 8px 8px 0;text-align:left;vertical-align:top}",
   ".hme-chat-markdown tr{border-bottom:1px solid var(--hme-border)}.hme-chat-markdown thead tr{border-bottom-color:var(--hme-rule)}.hme-chat-markdown th{font-weight:600}.hme-chat-markdown tbody tr:last-child{border-bottom:0}",
   ".hme-chat-markdown img{max-width:100%;height:auto;border-radius:8px}.hme-chat-markdown .hme-math-inline{font-family:Georgia,serif;font-style:italic}",
-  ".hme-chat-markdown .hme-math-block{display:block;text-align:center;overflow-x:auto;margin:1em 0 0;font-family:Georgia,serif;white-space:pre}",
+  ".hme-chat-markdown .hme-math-block{display:block;text-align:center;overflow-x:auto;overflow-y:hidden;margin:1em 0 0;font-family:Georgia,serif;white-space:pre}",
   ".hme-chat-markdown .hme-language{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-  ".hme-chat-markdown .hme-math-typeset{display:inline-block;max-width:100%;overflow-x:auto;vertical-align:middle}.hme-chat-markdown .hme-math-display{display:block;text-align:center}.hme-chat-markdown .hme-math-typeset math{font-size:1.1em}.hme-chat-markdown .hme-math-fallback{color:var(--hme-muted)}",
+  ".hme-chat-markdown .hme-math-typeset{display:inline-block;max-width:100%;vertical-align:middle}.hme-chat-markdown .hme-math-display{display:block;text-align:center;overflow-x:auto;overflow-y:hidden;padding:.15em 0}.hme-chat-markdown .hme-math-typeset math{font-size:1.1em}.hme-chat-markdown .hme-math-fallback{color:var(--hme-muted)}",
   ".hme-chat-markdown{--hme-syntax-keyword:#a626a4;--hme-syntax-string:#4c7c1e;--hme-syntax-number:#986801;--hme-syntax-comment:#7f848e;--hme-syntax-title:#146fb4;--hme-syntax-symbol:#b06a12;--hme-syntax-attr:#b06a12}",
   ".hme-chat-markdown[data-theme='dark']{--hme-syntax-keyword:#f8a6c8;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#b897f4;--hme-syntax-attr:#ffcb6b}",
   "@media(prefers-color-scheme:dark){.hme-chat-markdown[data-theme='system']{--hme-syntax-keyword:#f8a6c8;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#b897f4;--hme-syntax-attr:#ffcb6b}}",
@@ -163,6 +170,16 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
         }
       }
     }
+    // Bare http(s) URLs become links (GFM autolink); trailing punctuation stays text.
+    // (Not inside rejected link syntax like "[](url)", which must stay text.)
+    if (c === "h" && !/[\p{L}\p{N}/]/u.test(source[i - 1] ?? "") && source.slice(i - 2, i) !== "](" && /^https?:\/\//i.test(source.slice(i, i + 8))) {
+      const url = source.slice(i).match(/^https?:\/\/[^\s<>]+/i)![0].replace(/[.,;:!?'")\]]+$/, "");
+      if (url.length > 8 && safeUrl(url)) {
+        emit(<a href={url} target="_blank" rel="noopener noreferrer">{url}</a>);
+        i += url.length;
+        continue;
+      }
+    }
     if (c === "$" && source[i + 1] !== "$" && source[i + 1] !== " " && !/[0-9]/.test(source[i + 1] ?? "")) {
       const end = source.indexOf("$", i + 1);
       if (end > i + 1 && source[end - 1] !== "\\") {
@@ -179,8 +196,14 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
     let paired = false;
     for (const [marker, kind] of pairs) {
       if (!source.startsWith(marker, i)) continue;
-      const end = source.indexOf(marker, i + marker.length);
+      // Underscores inside words (snake_case) are literal, as in CommonMark.
+      if (marker[0] === "_" && /[\p{L}\p{N}]/u.test(source[i - 1] ?? "")) continue;
+      let end = source.indexOf(marker, i + marker.length);
       if (end <= i + marker.length) continue;
+      // A double marker closing inside a longer run ("***") closes at the end of the run, so
+      // "***x***" is strong(em(x)) and "**a *b***" keeps its inner emphasis.
+      if (marker.length === 2) while (source[end + 2] === marker[0]) end++;
+      if (marker[0] === "_" && /[\p{L}\p{N}]/u.test(source[end + marker.length] ?? "")) continue;
       const content = source.slice(i + marker.length, end);
       if (!content.trim() || /^\s|\s$/.test(content)) continue;
       const children = inline(content, opts, depth + 1);
@@ -269,6 +292,7 @@ function renderList(lines: string[], start: number, opts: RenderOptions, depth =
     let content = item[3];
     const task = content.match(/^\[([ xX])\]\s+(.*)$/);
     if (task) content = task[2];
+    const itemLine = (opts.lineBase ?? 0) + i;
     i++;
     const nested: React.ReactNode[] = [];
     while (i < lines.length) {
@@ -307,7 +331,8 @@ function renderList(lines: string[], start: number, opts: RenderOptions, depth =
       }
     }
     items.push(<li key={items.length} className={task ? "hme-task" : undefined}>
-      {task && <input type="checkbox" className="hme-checkbox" aria-label="Task completed" checked={task[1].toLowerCase() === "x"} readOnly />}
+      {task && <ToggleBox className="hme-checkbox" label="Task completed" checked={task[1].toLowerCase() === "x"}
+        onToggle={opts.onTaskToggle && (checked => opts.onTaskToggle!(itemLine, checked))} />}
       {inline(content, opts)}{nested}
     </li>);
   }
@@ -328,6 +353,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
     if (!current.trim()) { i++; continue; }
     const openingFence = current.match(fence);
     if (openingFence) {
+      const contentLine = (opts.lineBase ?? 0) + i + 1;
       const marker = openingFence[1];
       const language = openingFence[2].trim().split(/\s+/)[0].replace(/[^\w+#.-]/g, "");
       const source: string[] = [];
@@ -338,7 +364,8 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
       }
       if (i < lines.length) i++;
       const widget = opts.widgets && widgetKinds.has(language)
-        ? renderWidget(language, openingFence[2], source.join("\n"), text => inline(text, opts))
+        ? renderWidget(language, openingFence[2], source.join("\n"), text => inline(text, opts),
+          opts.onTaskToggle && ((line, checked) => opts.onTaskToggle!(contentLine + line, checked)))
         : null;
       add(widget ?? <CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} />);
       continue;
@@ -376,10 +403,11 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
     if (horizontalRule.test(current)) { add(<hr />); i++; continue; }
     if (quote.test(current)) {
       const quoted: string[] = [];
+      const quoteOpts = { ...opts, lineBase: (opts.lineBase ?? 0) + i };
       while (i < lines.length && quote.test(lines[i])) {
         quoted.push(lines[i++].replace(quote, ""));
       }
-      add(<blockquote>{depth >= 24 ? <p>{quoted.join(" ")}</p> : renderBlocks(quoted, opts, depth + 1)}</blockquote>);
+      add(<blockquote>{depth >= 24 ? <p>{quoted.join(" ")}</p> : renderBlocks(quoted, quoteOpts, depth + 1)}</blockquote>);
       continue;
     }
     if (listItem.test(current)) {
@@ -443,10 +471,11 @@ export function ChatMarkdownRenderer({
   renderMath,
   highlightCode,
   widgets = false,
+  onTaskToggle,
 }: ChatMarkdownRendererProps) {
   const nodes = useMemo(
-    () => renderBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"), { renderMath, highlightCode, widgets }),
-    [markdown, renderMath, highlightCode, widgets]
+    () => renderBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"), { renderMath, highlightCode, widgets, onTaskToggle }),
+    [markdown, renderMath, highlightCode, widgets, onTaskToggle]
   );
   return <div className={["hme-chat-markdown", className].filter(Boolean).join(" ")} style={style} data-theme={theme}>
     <style data-hme-markdown-styles>{chatMarkdownCss(widgets)}</style>
