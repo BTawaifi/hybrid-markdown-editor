@@ -2,6 +2,7 @@ import React from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
+import { codeLanguageLabel, detectCodeLanguage } from "./MarkdownIntegrations";
 
 describe("built-in typesetting and highlighting", () => {
   it("typesets inline and display LaTeX using KaTeX MathML without custom hooks", () => {
@@ -36,6 +37,16 @@ $$
     expect(blocks[0].querySelector(".hljs-keyword")).toBeTruthy();
     expect(blocks[1].textContent).toBe("hello <world>");
     expect(blocks[1].querySelector(".hljs")).toBeNull();
+  });
+
+  it("detects unlabeled code languages and keeps weak guesses as plain text", () => {
+    expect(detectCodeLanguage("npx create-next-app@latest taskflow\ncd taskflow")).toBe("bash");
+    expect(detectCodeLanguage("SELECT id FROM tasks;")).toBe("sql");
+    expect(detectCodeLanguage("export default async function Page() {\n  const tasks = await getTasks();\n  return <ul>{tasks.map((t) => <li key={t.id}>{t.title}</li>)}</ul>;\n}")).toBe("typescript");
+    expect(detectCodeLanguage("taskflow/\n├── app/\n│   └── page.tsx\n└── package.json")).toBe("");
+    expect(codeLanguageLabel("")).toBe("Plain text");
+    expect(codeLanguageLabel("tsx")).toBe("TSX");
+    expect(codeLanguageLabel("ts")).toBe("TypeScript");
   });
 
   it("escapes hostile code and keeps KaTeX trust disabled", () => {

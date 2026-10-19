@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { renderBuiltInHighlight, renderBuiltInMath } from "./MarkdownIntegrations";
+import { codeLanguageLabel, detectCodeLanguage, renderBuiltInHighlight, renderBuiltInMath } from "./MarkdownIntegrations";
 
 /**
  * A safe React renderer for chat-style Markdown with built-in math and syntax highlighting.
@@ -19,35 +19,38 @@ export type ChatMarkdownRendererProps = {
 
 type RenderOptions = Pick<ChatMarkdownRendererProps, "renderMath" | "highlightCode">;
 
+// Compact chat typography (16/26px body, 600-weight compact headings,
+// 8px block rhythm, 24px-radius code surfaces with a language header, borderless tables).
 const markdownCss = [
-  ".hme-chat-markdown{--hme-fg:#242424;--hme-muted:#707070;--hme-border:#dedede;--hme-panel:#f5f5f5;--hme-code:#f6f6f6;--hme-link:#1769aa;color:var(--hme-fg);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;line-height:1.75;overflow-wrap:anywhere;}",
-  ".hme-chat-markdown[data-theme='dark']{--hme-fg:#e9e9e9;--hme-muted:#aaa;--hme-border:#414141;--hme-panel:#252525;--hme-code:#2b2b2b;--hme-link:#89bdff;}",
-  "@media(prefers-color-scheme:dark){.hme-chat-markdown[data-theme='system']{--hme-fg:#e9e9e9;--hme-muted:#aaa;--hme-border:#414141;--hme-panel:#252525;--hme-code:#2b2b2b;--hme-link:#89bdff;}}",
-  ".hme-chat-markdown *{box-sizing:border-box}.hme-chat-markdown :first-child{margin-top:0}.hme-chat-markdown :last-child{margin-bottom:0}",
-  ".hme-chat-markdown p{margin:0 0 1.05em}.hme-chat-markdown h1,.hme-chat-markdown h2,.hme-chat-markdown h3,.hme-chat-markdown h4,.hme-chat-markdown h5,.hme-chat-markdown h6{font-weight:650;letter-spacing:-.025em;line-height:1.3;margin:1.65em 0 .6em;overflow-wrap:break-word}",
-  ".hme-chat-markdown h1{font-size:1.85em}.hme-chat-markdown h2{font-size:1.45em}.hme-chat-markdown h3{font-size:1.2em}.hme-chat-markdown h4{font-size:1.07em}.hme-chat-markdown h5,.hme-chat-markdown h6{font-size:1em}",
-  ".hme-chat-markdown strong{font-weight:700}.hme-chat-markdown em{font-style:italic}.hme-chat-markdown del{color:var(--hme-muted)}",
+  ".hme-chat-markdown{--hme-fg:#0d0d0d;--hme-muted:#5d5d5d;--hme-border:rgba(13,13,13,.1);--hme-rule:rgba(13,13,13,.15);--hme-panel:#f9f9f9;--hme-code:#ececec;--hme-link:#1769aa;color:var(--hme-fg);font-family:ui-sans-serif,-apple-system,system-ui,'Segoe UI',Helvetica,'Apple Color Emoji',Arial,sans-serif,'Segoe UI Emoji','Segoe UI Symbol';font-size:16px;line-height:1.625;overflow-wrap:anywhere;}",
+  ".hme-chat-markdown[data-theme='dark']{--hme-fg:#ededed;--hme-muted:#cdcdcd;--hme-border:rgba(255,255,255,.05);--hme-rule:rgba(255,255,255,.15);--hme-panel:#303030;--hme-code:rgba(33,33,33,.82);--hme-link:#89bdff;}",
+  "@media(prefers-color-scheme:dark){.hme-chat-markdown[data-theme='system']{--hme-fg:#ededed;--hme-muted:#cdcdcd;--hme-border:rgba(255,255,255,.05);--hme-rule:rgba(255,255,255,.15);--hme-panel:#303030;--hme-code:rgba(33,33,33,.82);--hme-link:#89bdff;}}",
+  ".hme-chat-markdown *{box-sizing:border-box}.hme-chat-markdown>:first-child,.hme-chat-markdown>style+*,.hme-chat-markdown blockquote>:first-child{margin-top:0}.hme-chat-markdown :last-child{margin-bottom:0}",
+  ".hme-chat-markdown p{margin:.5em 0 0}.hme-chat-markdown h1,.hme-chat-markdown h2,.hme-chat-markdown h3,.hme-chat-markdown h4,.hme-chat-markdown h5,.hme-chat-markdown h6{font-weight:600;letter-spacing:normal;line-height:1.625;margin:1.5em 0 0;overflow-wrap:break-word}",
+  ".hme-chat-markdown h1{font-size:1.25em;line-height:1.4}.hme-chat-markdown h2{font-size:1.125em;line-height:1.556;margin-top:1em}.hme-chat-markdown h3,.hme-chat-markdown h4,.hme-chat-markdown h5,.hme-chat-markdown h6{font-size:1em}",
+  ".hme-chat-markdown strong{font-weight:600}.hme-chat-markdown em{font-style:italic}.hme-chat-markdown del{color:var(--hme-muted)}",
   ".hme-chat-markdown a{color:var(--hme-link);text-decoration:underline;text-underline-offset:3px}.hme-chat-markdown a:hover{text-decoration-thickness:2px}",
-  ".hme-chat-markdown ul,.hme-chat-markdown ol{padding-left:1.6em;margin:.55em 0 1.15em}.hme-chat-markdown li{padding-left:.15em;margin:.2em 0}.hme-chat-markdown li>ul,.hme-chat-markdown li>ol{margin:.2em 0 .3em}",
+  ".hme-chat-markdown ul,.hme-chat-markdown ol{padding-left:2em;margin:.5em 0 0}.hme-chat-markdown li{margin:0}.hme-chat-markdown li>ul,.hme-chat-markdown li>ol{margin:0}",
   ".hme-chat-markdown li.hme-task{list-style:none;margin-left:-1.4em}.hme-chat-markdown .hme-checkbox{accent-color:#17803d;margin:0 .6em 0 0;width:1em;height:1em;vertical-align:-.08em}",
-  ".hme-chat-markdown blockquote{border-left:3px solid var(--hme-border);padding:.2em 0 .2em 1em;margin:1.35em 0;color:var(--hme-muted)}.hme-chat-markdown blockquote p{margin-bottom:.6em}",
-  ".hme-chat-markdown hr{border:0;border-top:1px solid var(--hme-border);margin:1.8em 0}",
-  ".hme-chat-markdown :not(pre)>code{background:var(--hme-code);border-radius:5px;padding:.13em .35em;font: .87em/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;white-space:break-spaces}",
-  ".hme-chat-markdown .hme-code-block{border:1px solid var(--hme-border);border-radius:12px;overflow:hidden;margin:1.2em 0;background:var(--hme-panel)}",
-  ".hme-chat-markdown .hme-code-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;border-bottom:1px solid var(--hme-border);padding:.45em .85em;color:var(--hme-muted);font-size:.76em}",
-  ".hme-chat-markdown .hme-code-copy{background:transparent;border:0;border-radius:5px;padding:.2em .5em;font:inherit;color:inherit;cursor:pointer}.hme-chat-markdown .hme-code-copy:hover{background:var(--hme-border)}",
-  ".hme-chat-markdown .hme-code-block pre{margin:0;overflow-x:auto;padding:1em 1.15em;tab-size:2;line-height:1.6;font: .85em/1.65 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;white-space:pre}",
-  ".hme-chat-markdown .hme-table-wrap{overflow-x:auto;margin:1.2em 0;border:1px solid var(--hme-border);border-radius:9px}",
-  ".hme-chat-markdown table{border-collapse:collapse;width:100%;min-width:max-content;font-size:.92em;line-height:1.55}",
-  ".hme-chat-markdown th,.hme-chat-markdown td{padding:.7em .9em;text-align:left;border-bottom:1px solid var(--hme-border)}",
-  ".hme-chat-markdown th{background:var(--hme-panel);font-weight:650}.hme-chat-markdown tr:last-child td{border-bottom:0}",
+  ".hme-chat-markdown blockquote{border-left:2px solid var(--hme-rule);padding:0 0 0 1em;margin:1em 0 0;color:var(--hme-muted)}",
+  ".hme-chat-markdown hr{border:0;height:1px;background:var(--hme-rule);margin:1em 0 0}",
+  ".hme-chat-markdown :not(pre)>code{background:var(--hme-code);border-radius:.25em;padding:.04em .28em;font: .8125em/1.5 ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;white-space:break-spaces}",
+  ".hme-chat-markdown .hme-code-block{border:1px solid var(--hme-border);border-radius:24px;overflow:hidden;margin:1em 0 0;background:var(--hme-panel)}",
+  ".hme-chat-markdown .hme-code-header{display:flex;align-items:center;gap:.5rem;min-height:48px;padding:6px 6px 6px 20px;font-size:14px;font-weight:500;line-height:20px}",
+  ".hme-chat-markdown .hme-code-icon{width:20px;height:20px;flex:none}",
+  ".hme-chat-markdown .hme-code-copy{margin-left:auto;background:transparent;border:0;border-radius:8px;padding:.35em .6em;font:inherit;color:var(--hme-muted);cursor:pointer}.hme-chat-markdown .hme-code-copy:hover{background:var(--hme-border)}",
+  ".hme-chat-markdown .hme-code-block pre{margin:0;overflow-x:auto;padding:0 20px 12px;tab-size:2;font: 12px/20px ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;white-space:pre}",
+  ".hme-chat-markdown .hme-table-wrap{overflow-x:auto;margin:1em 0 0}",
+  ".hme-chat-markdown table{border-collapse:collapse;width:100%;font-size:.875em;line-height:1.43}",
+  ".hme-chat-markdown th,.hme-chat-markdown td{padding:8px 8px 8px 0;text-align:left;vertical-align:top}",
+  ".hme-chat-markdown tr{border-bottom:1px solid var(--hme-border)}.hme-chat-markdown thead tr{border-bottom-color:var(--hme-rule)}.hme-chat-markdown th{font-weight:600}.hme-chat-markdown tbody tr:last-child{border-bottom:0}",
   ".hme-chat-markdown img{max-width:100%;height:auto;border-radius:8px}.hme-chat-markdown .hme-math-inline{font-family:Georgia,serif;font-style:italic}",
-  ".hme-chat-markdown .hme-math-block{display:block;text-align:center;overflow-x:auto;margin:1.3em 0;font-family:Georgia,serif;white-space:pre}",
-  ".hme-chat-markdown .hme-language{font-family:ui-monospace,monospace;text-transform:lowercase}",
+  ".hme-chat-markdown .hme-math-block{display:block;text-align:center;overflow-x:auto;margin:1em 0 0;font-family:Georgia,serif;white-space:pre}",
+  ".hme-chat-markdown .hme-language{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
   ".hme-chat-markdown .hme-math-typeset{display:inline-block;max-width:100%;overflow-x:auto;vertical-align:middle}.hme-chat-markdown .hme-math-display{display:block;text-align:center}.hme-chat-markdown .hme-math-typeset math{font-size:1.1em}.hme-chat-markdown .hme-math-fallback{color:var(--hme-muted)}",
   ".hme-chat-markdown{--hme-syntax-keyword:#a626a4;--hme-syntax-string:#4c7c1e;--hme-syntax-number:#986801;--hme-syntax-comment:#7f848e;--hme-syntax-title:#146fb4;--hme-syntax-symbol:#b06a12;--hme-syntax-attr:#b06a12}",
-  ".hme-chat-markdown[data-theme='dark']{--hme-syntax-keyword:#c792ea;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#ffcb6b;--hme-syntax-attr:#ffcb6b}",
-  "@media(prefers-color-scheme:dark){.hme-chat-markdown[data-theme='system']{--hme-syntax-keyword:#c792ea;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#ffcb6b;--hme-syntax-attr:#ffcb6b}}",
+  ".hme-chat-markdown[data-theme='dark']{--hme-syntax-keyword:#f8a6c8;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#b897f4;--hme-syntax-attr:#ffcb6b}",
+  "@media(prefers-color-scheme:dark){.hme-chat-markdown[data-theme='system']{--hme-syntax-keyword:#f8a6c8;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#b897f4;--hme-syntax-attr:#ffcb6b}}",
   ".hme-chat-markdown .hljs-keyword,.hme-chat-markdown .hljs-selector-tag,.hme-chat-markdown .hljs-literal,.hme-chat-markdown .hljs-built_in{color:var(--hme-syntax-keyword)}",
   ".hme-chat-markdown .hljs-string,.hme-chat-markdown .hljs-regexp,.hme-chat-markdown .hljs-addition{color:var(--hme-syntax-string)}",
   ".hme-chat-markdown .hljs-number,.hme-chat-markdown .hljs-meta{color:var(--hme-syntax-number)}",
@@ -119,7 +122,8 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
       const isImage = c === "!";
       const begin = i + (isImage ? 2 : 1);
       const end = source.indexOf("]", begin);
-      if (end > begin && source[end + 1] === "(") {
+      // Images may have an empty alt text (decorative); links need a label.
+      if ((end > begin || (isImage && end === begin)) && source[end + 1] === "(") {
         const close = source.indexOf(")", end + 2);
         if (close > end + 2) {
           const label = source.slice(begin, end);
@@ -191,7 +195,9 @@ const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
 const listItem = /^(\s*)([-+*]|\d+[.)])\s+(.*)$/;
 const quote = /^\s{0,3}>\s?/;
 const fence = /^\s{0,3}(\x60{3,}|~{3,})(.*)$/;
-const horizontalRule = /^\s{0,3}(?:\*\s*){3,}$|^\s{0,3}(?:-\s*){3,}$|^\s{0,3}(?:_\s*){3,}$/;
+const setext = /^\s{0,3}(=+|-+)\s*$/;
+const indentedCode = /^(?: {4}|\t)(?=\s*\S)/;
+const horizontalRule =/^\s{0,3}(?:\*\s*){3,}$|^\s{0,3}(?:-\s*){3,}$|^\s{0,3}(?:_\s*){3,}$/;
 
 function splitTableRow(row: string): string[] {
   const cells: string[] = [];
@@ -231,11 +237,15 @@ function CodePanel({ code, language, highlightCode }: {
       setCopied(false);
     }
   };
+  // Unlabeled blocks (indented code, bare fences) get a detected language, as chat UIs do.
+  const lang = useMemo(() => language || detectCodeLanguage(code), [code, language]);
   return <div className="hme-code-block">
-    <div className="hme-code-header"><span className="hme-language">{language || "text"}</span>
+    <div className="hme-code-header">
+      <svg className="hme-code-icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M7 6 3 10l4 4M13 6l4 4-4 4" /></svg>
+      <span className="hme-language">{codeLanguageLabel(lang)}</span>
       <button className="hme-code-copy" type="button" onClick={copy} aria-label="Copy code">{copied ? "Copied" : "Copy code"}</button>
     </div>
-    <pre><code>{highlightCode ? highlightCode(code, language) : renderBuiltInHighlight(code, language)}</code></pre>
+    <pre><code>{highlightCode ? highlightCode(code, lang) : renderBuiltInHighlight(code, lang)}</code></pre>
   </div>;
 }
 
@@ -256,6 +266,19 @@ function renderList(lines: string[], start: number, opts: RenderOptions, depth =
     i++;
     const nested: React.ReactNode[] = [];
     while (i < lines.length) {
+      if (!lines[i].trim()) {
+        // Loose lists: blank lines between items keep one list; indented text after a blank
+        // line continues the current item. Anything else ends the list.
+        let ahead = i;
+        while (ahead < lines.length && !lines[ahead].trim()) ahead++;
+        const sibling = lines[ahead]?.match(listItem);
+        const aheadIndent = (lines[ahead] ?? "").match(/^\s*/)![0].replace(/\t/g, "    ").length;
+        if (ahead < lines.length && (sibling ? aheadIndent >= baseIndent && (aheadIndent > baseIndent || /^\d/.test(sibling[2]) === ordered) : aheadIndent > baseIndent)) {
+          i = ahead;
+          continue;
+        }
+        break;
+      }
       const next = lines[i].match(listItem);
       if (!next) {
         if (lines[i].trim() && /^\s+/.test(lines[i])) {
@@ -370,12 +393,27 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
       </table></div>);
       continue;
     }
+    if (indentedCode.test(current)) {
+      // Indented code block; it cannot interrupt a paragraph, so it only starts here.
+      const source: string[] = [];
+      while (i < lines.length && (indentedCode.test(lines[i]) || !lines[i].trim())) {
+        source.push(lines[i++].replace(/^(?: {4}|\t)/, ""));
+      }
+      while (source.length && !source[source.length - 1].trim()) source.pop();
+      add(<CodePanel code={source.join("\n")} language="" highlightCode={opts.highlightCode} />);
+      continue;
+    }
     const paragraph = [current.trim()];
     i++;
-    while (i < lines.length && lines[i].trim() && !special(lines[i]) && !tableAlign(lines[i + 1] || "")) {
+    let setextLevel = 0;
+    while (i < lines.length && lines[i].trim()) {
+      const underline = lines[i].match(setext);
+      if (underline) { setextLevel = underline[1][0] === "=" ? 1 : 2; i++; break; }
+      if (special(lines[i]) || tableAlign(lines[i + 1] || "")) break;
       paragraph.push(lines[i++].trim());
     }
-    add(<p>{inline(paragraph.join(" "), opts)}</p>);
+    const text = inline(paragraph.join(" "), opts);
+    add(setextLevel ? React.createElement("h" + setextLevel, null, ...text) : <p>{text}</p>);
   }
   return nodes;
 }
