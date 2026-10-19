@@ -1,7 +1,7 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
+import { ChatMarkdownRenderer } from "./index";
 import { codeLanguageLabel, detectCodeLanguage } from "./MarkdownIntegrations";
 
 describe("built-in typesetting and highlighting", () => {

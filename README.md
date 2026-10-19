@@ -1,293 +1,327 @@
 # Hybrid Markdown Editor
 
-A lightweight, Obsidian-style Markdown editor for React. Inactive lines render as Markdown-like preview content; the active line becomes a normal auto-resizing textarea.
+Markdown editing and rendering for React, in two components:
+
+- **`HybridMarkdownEditor`**: an Obsidian-style editor. Your document shows fully formatted, and clicking a line turns just that line into plain text to edit.
+- **`ChatMarkdownRenderer`**: a safe, read-only renderer for displaying Markdown, such as AI chat replies, notes and docs.
+
+Both support headings, lists, task checkboxes, tables, code with syntax colours, math, quotes, GitHub alerts, light/dark themes and optional widgets (step flows, checklists, cards…). Raw HTML is never executed.
+
+---
+
+## Contents
+
+1. [Install](#1-install)
+2. [Quick start](#2-quick-start)
+3. [Recipes](#3-recipes)
+4. [Widgets](#4-widgets)
+5. [Keyboard shortcuts](#5-keyboard-shortcuts)
+6. [Props reference](#6-props-reference)
+7. [Styling and themes](#7-styling-and-themes)
+8. [Extensions](#8-extensions)
+9. [Security, limits and upgrading](#9-security-limits-and-upgrading)
+
+---
+
+## 1. Install
 
 ```bash
-npm i hybrid-markdown-editor
+npm install hybrid-markdown-editor
 ```
 
-## Rich full-document Markdown rendering
+You also need React 18 or newer (`react` and `react-dom`), which your app almost certainly has already. Nothing else to install or configure: no CSS imports, fonts or plugins.
 
-The package includes a chat-style document renderer with built-in syntax coloring and mathematical typesetting, in addition to the source-aware hybrid editor. No extra installation or renderer callbacks are required.
+---
 
-- **Math:** KaTeX typesets inline `$x^2$` / `\(x^2\)` and display `$$...$$` / `\[...\]` expressions into native MathML. This avoids separate stylesheets and font downloads, but appearance depends on the browser's MathML support.
-- **Code:** highlight.js colors fenced code for JavaScript/JSX, TypeScript/TSX, Python, Bash, JSON, CSS, XML/HTML, SQL, Go, Rust, YAML, Diff, and Markdown. Unknown languages remain readable plain text, and the copy button continues to work.
-- **Markdown:** headings, emphasis, strikethrough, inline code, links (including bare URLs), images, nested lists, task checkboxes, blockquotes, GitHub alerts (`> [!NOTE]` and friends), horizontal rules, and scrollable GFM-style tables.
-- **Appearance:** automatic light/dark/system typography and token colors.
+## 2. Quick start
 
-### Read-only renderer
-
-~~~tsx
-import { ChatMarkdownRenderer } from "hybrid-markdown-editor";
-
-const markdown = [
-  "# Calculations",
-  "",
-  "Euler's identity: $e^{i\\pi}+1=0$",
-  "",
-  "~~~ts",
-  "const result: number = 42;",
-  "~~~",
-].join("\n");
-
-<ChatMarkdownRenderer markdown={markdown} theme="system" />;
-~~~
-
-Rich rendering is enabled by default. Advanced callers can still supply `renderMath(latex, display)` or `highlightCode(code, language)` overrides.
-
-Task checkboxes (task lists and checklist/roadmap widget rows) can be clicked. By default they toggle locally and progress counters update; pass `onTaskToggle(line, checked)` to persist the change, where `line` is the 0-based line index in `markdown`.
-
-**Security:** raw HTML is escaped rather than executed, code highlighting escapes source tokens, unknown code languages render as React text, and KaTeX operates with `trust: false`. This is not a complete CommonMark parser. Native MathML requires browser support; advanced nested block edge cases may need a standards-compliant Markdown AST.
-
-## Core contract
-
-`HybridMarkdownEditor` is a controlled component. **Every document mutation**—typing, Enter, list continuation, Backspace merges, indentation, multi-line paste, rendered selection deletion, and extension API edits—flows through the same change pipeline and calls `onChange(nextMarkdown)`.
+### Edit Markdown
 
 ```tsx
-import { useState } from 'react';
-import { HybridMarkdownEditor } from 'hybrid-markdown-editor';
+import { useState } from "react";
+import { HybridMarkdownEditor } from "hybrid-markdown-editor";
 
-export default function App() {
-  const [value, setValue] = useState('# Title\n- item');
+export default function NoteEditor() {
+  const [markdown, setMarkdown] = useState("# My note\n\n- [ ] Try clicking this line");
 
-  return (
-    <HybridMarkdownEditor
-      value={value}
-      onChange={setValue}
-      onDebouncedChange={(next) => console.log('save', next)}
-      debounceMs={1000}
-    />
-  );
+  return <HybridMarkdownEditor value={markdown} onChange={setMarkdown} />;
 }
 ```
 
-Controlled value echoes from the parent do not cancel the pending local debounce. A genuinely different external value replaces the local document and cancels that stale pending debounce.
+That's a complete editor. Click any line to edit it. Click elsewhere or press **Escape** to stop editing.
 
-## Features
+### Display Markdown
 
-- Per-line editing with auto-resizing textareas
-- Controlled `value` / `onChange` behavior across all edit paths
-- Debounced change callback for persistence/autosave
-- Strict `readOnly` mode
-- Automatic unordered, ordered, task-list, and blockquote continuation on Enter
-- Selection-aware Enter and multi-line paste
-- Smart Backspace line joining and marker removal
-- List indentation/dedentation
-- Multi-line rendered selection deletion
-- Inactive lines render with the same renderer as the preview: full inline formatting, math, heading and list styles
-- Tables, fenced code, display math, widget fences and underlined headings render as blocks; clicking one edits the source line you clicked, and the whole block shows its source while you edit inside it
-- Click-to-caret mapping that follows the rendered text
-- Keyboard accessible: the editor is focusable, Enter starts editing, Escape stops editing so Tab can leave
-- Task checkboxes (task lists, checklist/roadmap widget rows, preview mode) toggle `[ ]` / `[x]` in the source
-- Large documents stay responsive: only the edited line and changed blocks re-render
-- Undo/redo with Ctrl/Cmd+Z and Ctrl+Shift+Z / Ctrl+Y (typing on a line merges into one step)
-- Optional chat-style full-document preview and standalone renderer
-- Distinct preview markers for unordered, ordered, checked, and unchecked task items
-- Extension hooks for keyboard, paste, prefix, and suffix behavior
-- Class and style hooks for root/content/line/preview/textarea/marker surfaces
-- CJS + ESM builds with TypeScript declarations
+```tsx
+import { ChatMarkdownRenderer } from "hybrid-markdown-editor";
 
-## Editing model
-
-```text
-controlled markdown string
-        │
-        ▼
-internal line projection
-├── inactive line → preview + source mapping
-├── active line   → textarea
-└── ...
-        │
-        ▼
-central commit pipeline
-├── update internal projection
-├── onChange(nextMarkdown)
-└── schedule onDebouncedChange(nextMarkdown)
+export function Message({ text }: { text: string }) {
+  return <ChatMarkdownRenderer markdown={text} />;
+}
 ```
 
-The line projection is not an independent persistence model. External application state remains authoritative.
+### Using Next.js?
 
-## Lists and blockquotes
+Both components work with the App Router out of the box. The package is marked `"use client"`, so you can import it straight into a page or layout.
 
-The preview distinguishes list kinds instead of flattening everything to a bullet:
+---
 
-```text
-- unordered    → • unordered
-7. ordered     → 7. ordered
-- [ ] todo     → ☐ todo
-- [x] done     → ☑ done
-> quote        → > quote
+## 3. Recipes
+
+Each recipe is a small, complete change you can copy.
+
+### Save automatically
+
+`onChange` fires on every keystroke. `onDebouncedChange` fires once the user pauses, which is ideal for saving.
+
+```tsx
+<HybridMarkdownEditor
+  value={markdown}
+  onChange={setMarkdown}
+  onDebouncedChange={(text) => localStorage.setItem("note", text)}
+  debounceMs={800}
+/>
 ```
 
-Leading indentation is retained visually for nested list/quote previews. When editing, the textarea contains the original Markdown source unchanged.
+### Show a "rendered" view with an Edit button
 
-## Selection and caret mapping
+```tsx
+<HybridMarkdownEditor value={markdown} onChange={setMarkdown} presentation="preview" />
+```
 
-Inactive lines keep the source-backed content in a dedicated `[data-role="source-content"]` element. Extension prefix/suffix decorations live outside that source-mapped element, so decorative text does not shift source offsets.
+The whole document renders like `ChatMarkdownRenderer`, with **Edit** and **Preview** buttons to switch.
 
-For custom `renderLine` implementations, the provided `defaultContent` contains the source-mapped element. If a custom renderer keeps that node, clicks inside it retain exact source mapping. Clicks on unrelated custom content safely activate at the end of the source line rather than inventing an incorrect mapping.
+### Make it read-only
 
-Malformed/literal `**` sequences remain literal and are no longer treated as invisible formatting markers by caret mapping.
+```tsx
+<HybridMarkdownEditor value={markdown} readOnly />
+```
 
-## Read-only mode
+### Dark mode
 
-`readOnly` prevents activation, textarea editing, extension editing entry points, and rendered-selection deletion. Changing `readOnly` to `true` while a line is active immediately returns it to preview mode.
+```tsx
+<ChatMarkdownRenderer markdown={text} theme="dark" />                          {/* "light", "dark" or "system" */}
+<HybridMarkdownEditor value={md} onChange={setMd} chatMarkdownProps={{ theme: "dark" }} />
+```
 
-## Props
+The default is `"system"`, which follows the user's OS setting.
 
-| Prop | Type | Description |
+### Save checkbox clicks
+
+- **In the editor**, clicking a task checkbox changes `[ ]` to `[x]` in your Markdown and calls `onChange`. Nothing to do.
+- **In the renderer**, checkboxes toggle on screen. To save the change, use `onTaskToggle`. `line` is the 0-based line number in your Markdown:
+
+```tsx
+<ChatMarkdownRenderer
+  markdown={text}
+  onTaskToggle={(line, checked) => {
+    const lines = text.split("\n");
+    lines[line] = lines[line].replace(/\[[ xX]\]/, checked ? "[x]" : "[ ]");
+    setText(lines.join("\n"));
+  }}
+/>
+```
+
+### Use a smaller bundle
+
+Built-in math (KaTeX) and code colours (highlight.js) are most of the package size. If you don't need them, import from `/lite`. It has the same components and props:
+
+```tsx
+import { HybridMarkdownEditor, ChatMarkdownRenderer } from "hybrid-markdown-editor/lite";
+```
+
+| Import | Minified | Gzipped |
 | --- | --- | --- |
-| `value` | `string` | Controlled Markdown value |
-| `onChange` | `(value: string) => void` | Fires for every committed document edit |
-| `onDebouncedChange` | `(value: string) => void` | Fires after the configured quiet period |
-| `debounceMs` | `number` | Debounce delay; default `1000` |
-| `readOnly` | `boolean` | Disables all document mutations |
-| `className` | `string` | Extra root class |
-| `classNames` | `object` | Class hooks for editor surfaces |
-| `styles` | `object` | Inline style overrides applied after structural defaults |
-| `renderLine` | `function` | Custom inactive-line renderer |
-| `options` | `object` | Editing behavior options |
-| `extensions` | `EditorExtension[]` | Keyboard/paste/decorating extensions |
+| `hybrid-markdown-editor` | 389 KB | 117 KB |
+| `hybrid-markdown-editor/lite` | 53 KB | 17 KB |
 
-### Behavior options
+In the lite build, math shows as its source (`x^2`) and code as plain text. You can still plug in your own:
 
 ```tsx
-<HybridMarkdownEditor
-  value={value}
-  onChange={setValue}
-  options={{
-    indentSize: 4,
-    continueListsOnEnter: true,
-    pasteSplitLines: true,
-  }}
+<ChatMarkdownRenderer
+  markdown={text}
+  renderMath={(latex, display) => <MyMath latex={latex} block={display} />}
+  highlightCode={(code, language) => <MyHighlighter code={code} lang={language} />}
 />
 ```
 
-### Styling hooks
+---
+
+## 4. Widgets
+
+Widgets are special code blocks that render as interactive cards. They're **off by default**, because other Markdown apps (GitHub, Obsidian) will show them as ordinary code blocks. Turn them on with `widgets`:
+
+```tsx
+<ChatMarkdownRenderer markdown={text} widgets />
+<HybridMarkdownEditor value={md} onChange={setMd} chatMarkdownProps={{ widgets: true }} />
+```
+
+Each widget is a fenced block. Items are one per line, with ` | ` between parts. Optional parts can be left out.
+
+````md
+```flow
+Browser | Fetch JS
+React | Render UI
+Display | Content
+```
+````
+
+| Widget | Each line | What you get |
+| --- | --- | --- |
+| `flow` | `Step \| detail` | Step cards with arrows. Horizontal for up to 4 steps, otherwise vertical. Force one with `flow vertical` or `flow horizontal`. |
+| `checklist` | `- [ ] item \| value \| detail` | Checkboxes with a done count, an optional right-aligned value (`200 g`) and a detail line |
+| `roadmap` | `- [ ] item \| tag \| detail` | Numbered steps with tags and a progress bar |
+| `cards` | `Title \| body \| note \| badge` | Stacked cards. Use `cards grid` for tiles. |
+| `choice` | `- Option \| recommendation \| detail \| note` | Radio options; the recommendation updates when you pick one |
+| `callout` | free text (blank line between paragraphs) | A highlighted note. Variants: `callout tip`, `note`, `warning`, `important`. |
+
+Most widgets accept a `title:` line before the items. `choice` also takes `prompt:`, and `roadmap` takes `unit:`, e.g. `unit: chapters`:
+
+````md
+```checklist
+title: Ingredients
+- [ ] Pasta | 200 g
+- [x] Spinach | 2 handfuls | Wash it first
+```
+````
+
+---
+
+## 5. Keyboard shortcuts
+
+While editing a line:
+
+| Key | Does |
+| --- | --- |
+| **Enter** | New line; lists and quotes continue automatically |
+| **Backspace** at the start of a list line | Removes the `- ` / `1. ` / `> ` marker; press again to join with the line above |
+| **Tab** / **Shift+Tab** | Indent / outdent a list item |
+| **↑** at the start / **↓** at the end of a line | Move to the previous / next line |
+| **Ctrl/Cmd+Z** | Undo |
+| **Ctrl+Shift+Z** or **Ctrl+Y** | Redo |
+| **Escape** | Stop editing (then **Tab** moves on to the rest of the page) |
+
+When the editor itself has focus, **Enter** (or **F2**) resumes editing the last line.
+
+Links, Copy buttons and widget controls inside the editor work normally. Click elsewhere on a line to edit it.
+
+---
+
+## 6. Props reference
+
+### `HybridMarkdownEditor`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `value` | `string` | (required) | The Markdown text |
+| `onChange` | `(text) => void` | | Called on every edit |
+| `onDebouncedChange` | `(text) => void` | | Called after the user pauses typing |
+| `debounceMs` | `number` | `1000` | Pause length for `onDebouncedChange` |
+| `readOnly` | `boolean` | `false` | Disables editing |
+| `presentation` | `"hybrid"` \| `"preview"` | `"hybrid"` | Line-by-line editing, or a rendered view with an Edit button |
+| `chatMarkdownProps` | object | | Renderer options: `theme`, `widgets`, `renderMath`, `highlightCode`, `onTaskToggle` |
+| `options` | object | | `indentSize` (default `2`), `continueListsOnEnter` (default `true`), `pasteSplitLines` (default `true`) |
+| `className`, `classNames`, `styles` | | | Styling hooks, see [Styling](#7-styling-and-themes) |
+| `renderLine` | function | | Replace how an inactive line is drawn (advanced) |
+| `extensions` | `EditorExtension[]` | | Custom keys, paste handling and line decorations, see [Extensions](#8-extensions) |
+
+### `ChatMarkdownRenderer`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `markdown` | `string` | (required) | The Markdown text |
+| `theme` | `"system"` \| `"light"` \| `"dark"` | `"system"` | Colour theme |
+| `widgets` | `boolean` | `false` | Render [widget](#4-widgets) blocks |
+| `onTaskToggle` | `(line, checked) => void` | | Called when a checkbox is clicked |
+| `renderMath` | `(latex, display) => ReactNode` | built-in KaTeX | Custom math renderer |
+| `highlightCode` | `(code, language) => ReactNode` | built-in highlight.js | Custom code highlighter |
+| `className`, `style` | | | Applied to the wrapper element |
+
+---
+
+## 7. Styling and themes
+
+The components bring their own styles. To adjust them:
+
+**Change colours** with CSS variables on the component's `style`:
+
+```tsx
+<ChatMarkdownRenderer
+  markdown={text}
+  style={{ ["--hme-link" as string]: "#c026d3", ["--hme-fg" as string]: "#1f2937" }}
+/>
+<HybridMarkdownEditor value={md} onChange={setMd} styles={{ root: { ["--hme-link" as string]: "#c026d3" } }} />
+```
+
+Available variables: `--hme-fg` (text), `--hme-muted` (secondary text), `--hme-link`, `--hme-border`, `--hme-rule` (lines and quote bars), `--hme-panel` (code block background), `--hme-code` (inline code background).
+
+**Add your own classes or inline styles** to the editor's parts:
 
 ```tsx
 <HybridMarkdownEditor
-  value={value}
-  onChange={setValue}
-  classNames={{
-    root: 'editor',
-    content: 'editor-content',
-    line: 'editor-line',
-    activeLine: 'editor-line-active',
-    preview: 'editor-preview',
-    textarea: 'editor-textarea',
-    marker: 'editor-marker',
-    lineTypes: {
-      h1: 'heading-1',
-      li: 'list-item',
-      blockquote: 'quote',
-      p: 'paragraph',
-    },
-  }}
-  styles={{
-    textarea: { fontFamily: 'inherit' },
-    marker: { minWidth: 24 },
-  }}
+  value={md}
+  onChange={setMd}
+  classNames={{ root: "editor", line: "editor-line", activeLine: "editing", textarea: "editor-input" }}
+  styles={{ content: { maxWidth: 720, margin: "0 auto" } }}
 />
 ```
 
-`styles` are spread after the component's structural defaults so consumers can override those defaults without relying on `!important`.
+Class hooks: `root`, `content`, `line` (a string, or a function of `{ index, type, isActive }`), `activeLine`, `preview`, `textarea`, `marker`, and `lineTypes` per line type (`h1`–`h6`, `li`, `blockquote`, `p`). `styles` takes the same parts and is applied after the defaults, so it always wins.
 
-## Extensions API
+---
 
-```ts
-type EditorExtension = {
-  onKeyDown?: (event, api) => boolean | void;
-  onPaste?: (event, api) => boolean | void;
-  renderLinePrefix?: (context) => React.ReactNode;
-  renderLineSuffix?: (context) => React.ReactNode;
+## 8. Extensions
+
+Extensions add your own keyboard shortcuts, paste handling or line decorations. Return `true` from a handler to say "handled, skip the default".
+
+```tsx
+import type { EditorExtension } from "hybrid-markdown-editor";
+
+// Ctrl+B wraps the current line in **bold**
+const boldLine: EditorExtension = {
+  onKeyDown: (event, api) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "b") return;
+    const index = api.getActiveLineIndex();
+    if (index === null) return;
+    event.preventDefault();
+    api.setLine(index, `**${api.getLine(index)}**`);
+    return true;
+  },
 };
 
-type ExtensionApi = {
-  getValue: () => string;
-  setValue: (next: string) => void;
-  getLine: (index: number) => string | undefined;
-  setLine: (index: number, next: string) => void;
-  insertLine: (index: number, value: string) => void;
-  deleteLines: (start: number, count: number) => void;
-  getActiveLineIndex: () => number | null;
-  setActiveLineIndex: (index: number | null, caret?: number | null) => void;
-};
+<HybridMarkdownEditor value={md} onChange={setMd} extensions={[boldLine]} />;
 ```
 
-Mutation methods on `ExtensionApi` use the same central commit path as built-in edits, including `onChange` and debounced notifications.
+The `api` object can read and change the document: `getValue`, `setValue`, `getLine`, `setLine`, `insertLine`, `deleteLines`, `getActiveLineIndex` and `setActiveLineIndex`. Changes made through it go through the same path as typing, so `onChange` fires and undo works. Use `renderLinePrefix` / `renderLineSuffix` to draw something before or after each line.
 
-Prefix/suffix render hooks run in both preview and active states and receive the actual `isActive` value.
+---
 
-## Keyboard behavior
+## 9. Security, limits and upgrading
 
-- **Enter** splits at the current selection and optionally continues the current list/quote.
-- **Backspace at or near a list/quote marker** first removes the marker, turning the line into plain text.
-- **Backspace at column 0 of a plain line** joins it with the previous line.
-- **Tab / Shift+Tab** indent or dedent list/quote items.
-- **Arrow Up** moves to the previous Markdown line only when the caret is at source column 0.
-- **Arrow Down** moves to the next Markdown line only when the caret is at the end of the source line.
-- **Escape** stops editing and focuses the editor, so **Tab** moves on to the rest of the page.
-- **Enter** (or **F2**) on the focused editor resumes editing the last edited line.
-- **Ctrl/Cmd+Z** undoes, **Ctrl+Shift+Z** or **Ctrl+Y** redoes, while editing or with the editor focused.
+**Security.**
+- Raw HTML in Markdown is shown as text, never executed.
+- `javascript:`, `data:` and similar links are dropped.
+- Code is escaped before highlighting, and KaTeX runs with `trust: false`.
+- The parser is fuzz-tested, including against slow-regex (ReDoS) inputs.
 
-Links, copy buttons and widget controls inside rendered lines keep working and do not start editing; click elsewhere on the line to edit it.
+**Limits.**
+- Not supported: footnotes, reference-style links (`[text][id]`) and raw HTML (by design).
+- It's a line-based editor, not a full document engine like ProseMirror. Collaborative editing is out of scope.
+- Math uses the browser's MathML support, which all current browsers have.
 
-Keeping Arrow Up/Down native in the middle of the textarea avoids breaking normal navigation through visually wrapped text.
+**Upgrading from 1.x?** See the [CHANGELOG](./CHANGELOG.md). The main changes:
+- Lines now render with full formatting.
+- Task markers are real checkboxes.
+- Imports must come from `hybrid-markdown-editor` or `hybrid-markdown-editor/lite`, not `dist/…`.
 
-## Verification
-
-The test suite includes helper-level tests plus interaction/regression tests for the component contract. CI verifies:
+### Developing
 
 ```bash
 npm ci
+npm test          # vitest
 npm run typecheck
-npm test
-npm run build
-npm pack --dry-run
-npm audit --audit-level=high
+npm run build     # outputs dist/ (ESM, CommonJS and type declarations)
 ```
-
-Regression coverage includes:
-
-- every built-in mutation path emitting `onChange`
-- extension mutations emitting changes
-- controlled debounce behavior
-- external value replacement
-- strict read-only behavior
-- selected-text replacement on Enter/paste
-- line merges and list-marker removal
-- list continuation/indentation/dedentation
-- rendered same-line and cross-line deletion
-- ordered/task/nested list preview behavior
-- extension source-mapping isolation
-- malformed bold syntax mapping
-- focus/scroll behavior
-- Arrow navigation boundaries
-- ReDoS-oriented long-input rendering
-
-## Package surface
-
-The npm entry point intentionally exports only:
-
-- `HybridMarkdownEditor`
-- `parseBold`
-- `mapDisplayOffsetToSourceIndex`
-- `EditorExtension`
-- `ExtensionApi`
-- `HybridMarkdownEditorProps`
-
-Internal test helpers remain outside the public package entry point.
-
-## Scope / known limitations
-
-This is deliberately a line-oriented editor rather than a ProseMirror/TipTap-style document engine.
-
-- Complex nested block semantics are limited by the line model.
-- Collaborative editing/CRDT behavior is outside the package.
-- Persistence and undo history belong to the host application.
-- Very large documents may eventually need virtualization or a different document representation.
-- Custom renderers that replace `defaultContent` completely cannot provide exact click-to-source mapping unless they preserve or implement their own source-mapped content.
 
 ## License
 

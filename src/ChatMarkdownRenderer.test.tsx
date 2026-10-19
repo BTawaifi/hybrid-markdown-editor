@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
-import { HybridMarkdownEditor } from "./HybridMarkdownEditor";
+import { ChatMarkdownRenderer } from "./index";
+import { HybridMarkdownEditor } from "./index";
 
 describe("ChatMarkdownRenderer", () => {
   it("renders headings, inline formatting, safe links and images", () => {

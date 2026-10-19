@@ -2,8 +2,9 @@ import React, { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
-import { HybridMarkdownEditor, mapDisplayOffsetToSourceIndex } from "./HybridMarkdownEditor";
+import { ChatMarkdownRenderer } from "./index";
+import { HybridMarkdownEditor } from "./index";
+import { mapDisplayOffsetToSourceIndex } from "./HybridMarkdownEditor";
 
 // Fixed-seed fuzz cases are deterministic in CI and reproducible locally.
 function generator(seed: number) {

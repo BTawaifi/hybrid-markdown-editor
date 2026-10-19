@@ -1,4 +1,5 @@
 import React from "react";
+import { codeLanguageLabel, languageAliases } from "./codeLabels";
 import katex from "katex";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -24,37 +25,7 @@ Object.entries(grammars).forEach(([name, grammar]) => {
   hljs.registerLanguage(name, grammar);
 });
 
-const aliases: Record<string, keyof typeof grammars> = {
-  cjs: "javascript",
-  js: "javascript",
-  jsx: "javascript",
-  mjs: "javascript",
-  ts: "typescript",
-  tsx: "typescript",
-  py: "python",
-  sh: "bash",
-  shell: "bash",
-  zsh: "bash",
-  html: "xml",
-  svg: "xml",
-  md: "markdown",
-  yml: "yaml",
-  rs: "rust",
-  golang: "go",
-};
-
-const displayNames: Record<string, string> = {
-  bash: "Bash", css: "CSS", diff: "Diff", go: "Go", javascript: "JavaScript", json: "JSON",
-  markdown: "Markdown", python: "Python", rust: "Rust", sql: "SQL", typescript: "TypeScript",
-  xml: "HTML", yaml: "YAML", jsx: "JSX", tsx: "TSX", html: "HTML", svg: "SVG", sh: "Shell",
-};
-
-/** Human-readable language name for a code block header, as chat UIs show it. */
-export function codeLanguageLabel(language: string): string {
-  const key = language.toLowerCase();
-  if (!key || key === "text" || key === "plaintext") return "Plain text";
-  return displayNames[key] ?? displayNames[aliases[key] ?? ""] ?? language;
-}
+export { codeLanguageLabel };
 
 /**
  * Guess the language of an unlabeled code block among the registered grammars.
@@ -114,7 +85,7 @@ export function renderBuiltInMath(latex: string, display: boolean): React.ReactN
  */
 export function renderBuiltInHighlight(code: string, language: string): React.ReactNode {
   const label = language.toLowerCase();
-  const grammar = aliases[label] ?? label;
+  const grammar = languageAliases[label] ?? label;
   if (code.length > 100000 || !Object.prototype.hasOwnProperty.call(grammars, grammar)) return code;
 
   try {
@@ -124,3 +95,10 @@ export function renderBuiltInHighlight(code: string, language: string): React.Re
     return code;
   }
 }
+
+/** Full-entry integrations: KaTeX math, highlight.js colouring and language detection. */
+export const builtInIntegrations = {
+  renderMath: renderBuiltInMath,
+  highlightCode: renderBuiltInHighlight,
+  detectLanguage: detectCodeLanguage,
+};

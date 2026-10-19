@@ -50,6 +50,13 @@ jobs:
           test -s dist/index.d.ts
           test -s dist/ChatMarkdownRenderer.d.ts
           test -s dist/HybridMarkdownEditor.d.ts
+          node -e "const x = require('./dist/lite.js'); if (typeof x.ChatMarkdownRenderer !== 'function' || typeof x.HybridMarkdownEditor !== 'function') process.exit(1)"
+          node --input-type=module -e "import {ChatMarkdownRenderer, HybridMarkdownEditor} from './dist/lite.mjs'; if (typeof ChatMarkdownRenderer !== 'function' || typeof HybridMarkdownEditor !== 'function') process.exit(1)"
+          test -s dist/lite.d.ts
+          # The lite entry must not pull in KaTeX or highlight.js.
+          ! grep -l "katex\|highlight.js" dist/lite.js dist/lite.mjs $(grep -o "chunk-[A-Z0-9]*\.mjs" dist/lite.mjs | sed 's|^|dist/|')
+          # Components keep their client directive for React Server Components.
+          head -c 20 dist/index.mjs | grep -q "use client"
 
       - name: Verify package contents
         run: npm pack --dry-run
