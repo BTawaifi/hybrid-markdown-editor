@@ -304,7 +304,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
       const source: string[] = [];
       i++;
       const closeFence = (candidate: string) => { const trimmed = candidate.trim(); return candidate.length - candidate.trimStart().length <= 3 && trimmed.length >= marker.length && Array.from(trimmed).every(char => char === marker[0]); };
-      while (i < lines.length && !closeFence.test(lines[i])) {
+      while (i < lines.length && !closeFence(lines[i])) {
         source.push(lines[i++]);
       }
       if (i < lines.length) i++;
