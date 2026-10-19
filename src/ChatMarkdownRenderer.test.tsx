@@ -31,7 +31,7 @@ describe("ChatMarkdownRenderer", () => {
   });
 
   it("renders fenced code with language and copy control", () => {
-    const markdown = "&#96;&#96;&#96;typescript\nconst n = 42;\n&#96;&#96;&#96;".replaceAll("&#96;", String.fromCharCode(96));
+    const markdown = "&#96;&#96;&#96;typescript\nconst n = 42;\n&#96;&#96;&#96;".split("&#96;").join(String.fromCharCode(96));
     const { container } = render(<ChatMarkdownRenderer markdown={markdown} />);
     expect(container.querySelector(".hme-language")?.textContent).toBe("typescript");
     expect(container.querySelector("pre code")?.textContent).toBe("const n = 42;");
