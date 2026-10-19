@@ -60,4 +60,35 @@ describe("widget fences", () => {
     expect(container.querySelector(".hme-code-block pre code")?.textContent).toBe("Browser | Fetch JS\nReact | Render UI");
     expect(container.querySelector("style")?.textContent).not.toContain("hme-widget");
   });
+
+  it("renders checklist values and details, and roadmap details", () => {
+    const list = render(<ChatMarkdownRenderer widgets markdown={fenced("checklist", "title: Ingredients\n- [ ] Pasta | 200 g\n- [ ] Boil the pasta | | Salt the water first")} />);
+    expect(list.container.querySelector(".hme-w-value")?.textContent).toBe("200 g");
+    expect(list.container.querySelectorAll(".hme-w-value")).toHaveLength(1);
+    expect(list.container.querySelector(".hme-w-detail")?.textContent).toBe("Salt the water first");
+    const road = render(<ChatMarkdownRenderer widgets markdown={fenced("roadmap", "- [ ] Basics | Core | Routing and layouts\n- [ ] Extras")} />);
+    expect(road.container.querySelector(".hme-w-tag")?.textContent).toBe("Core");
+    expect(road.container.querySelector(".hme-w-detail")?.textContent).toBe("Routing and layouts");
+  });
+
+  it("renders card badges and the grid layout", () => {
+    const { container } = render(<ChatMarkdownRenderer widgets markdown={fenced("cards grid", "Incident | Live scores freeze | 20:43 UTC | SEV-1\nPlain card")} />);
+    expect(container.querySelector(".hme-cards")?.classList.contains("is-grid")).toBe(true);
+    expect(container.querySelector(".hme-w-badge")?.textContent).toBe("SEV-1");
+    expect(container.querySelectorAll(".hme-w-badge")).toHaveLength(1);
+  });
+
+  it("renders callouts with variant, default label and paragraphs", () => {
+    const { container } = render(<ChatMarkdownRenderer widgets markdown={fenced("callout tip", "title: Chef's tip\nStarchy water\nemulsifies the sauce.\n\nAdd cheese **off** the heat.")} />);
+    const callout = container.querySelector(".hme-callout");
+    expect(callout?.classList.contains("is-tip")).toBe(true);
+    expect(callout?.getAttribute("role")).toBe("note");
+    expect(callout?.querySelector(".hme-w-title")?.textContent).toBe("Chef's tip");
+    expect([...callout!.querySelectorAll("p:not(.hme-w-title)")].map(p => p.textContent)).toEqual(["Starchy water emulsifies the sauce.", "Add cheese off the heat."]);
+    expect(callout?.querySelector("strong")?.textContent).toBe("off");
+    const plain = render(<ChatMarkdownRenderer widgets markdown={fenced("callout warning", "Back up first.")} />);
+    expect(plain.container.querySelector(".hme-callout .hme-w-title")?.textContent).toBe("Warning");
+    const empty = render(<ChatMarkdownRenderer widgets markdown={fenced("callout", "")} />);
+    expect(empty.container.querySelector(".hme-code-block")).toBeTruthy();
+  });
 });
