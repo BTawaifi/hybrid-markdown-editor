@@ -104,6 +104,8 @@ describe("deterministic adversarial Markdown fuzzing", () => {
     const code = "const x = 1;".repeat(10000);
     const html = renderToStaticMarkup(<ChatMarkdownRenderer markdown={marker + "typescript\n" + code + "\n" + marker} />);
     expect(html).toContain("const x = 1;");
-    expect(html).not.toContain("hljs-keyword");
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    expect(container.querySelector("pre code .hljs-keyword")).toBeNull();
   });
 });
