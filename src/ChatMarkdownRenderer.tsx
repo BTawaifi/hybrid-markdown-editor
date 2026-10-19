@@ -293,7 +293,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
   let i = 0;
   const add = (node: React.ReactNode) => nodes.push(<React.Fragment key={nodes.length}>{node}</React.Fragment>);
   const special = (text: string): boolean =>
-    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith("$") || text.trim().startsWith("\\["));
+    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith(String.fromCharCode(36, 36)) || text.trim().startsWith("\\["));
   while (i < lines.length) {
     const current = lines[i];
     if (!current.trim()) { i++; continue; }
@@ -303,7 +303,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
       const language = openingFence[2].trim().split(/\s+/)[0].replace(/[^\w+#.-]/g, "");
       const source: string[] = [];
       i++;
-      const closeFence = new RegExp("^\\\\s{0,3}" + (marker[0] === "\\x60" ? "\\\\x60" : "~") + "{" + marker.length + ",}\\\\s*$");
+      const closeFence = (candidate: string) => { const trimmed = candidate.trim(); return candidate.length - candidate.trimStart().length <= 3 && trimmed.length >= marker.length && Array.from(trimmed).every(char => char === marker[0]); };
       while (i < lines.length && !closeFence.test(lines[i])) {
         source.push(lines[i++]);
       }
@@ -313,7 +313,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
     }
     const mathStart = current.trim().startsWith("$$") ? "$$" : current.trim().startsWith("\\[") ? "\\[" : null;
     if (mathStart) {
-      const mathEnd = mathStart === "$" ? "$" : "\\]";
+      const mathEnd = mathStart === String.fromCharCode(36, 36) ? String.fromCharCode(36, 36) : "\\]";
       let latex = current.trim().slice(mathStart.length);
       const closeOnOpeningLine = latex.indexOf(mathEnd);
       if (closeOnOpeningLine >= 0) {
