@@ -286,7 +286,7 @@ function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
   let i = 0;
   const add = (node: React.ReactNode) => nodes.push(<React.Fragment key={nodes.length}>{node}</React.Fragment>);
   const special = (text: string): boolean =>
-    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith("$") || text.trim().startsWith("\\["));
+    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith("$") || text.trim().startsWith("\\\\["));
   while (i < lines.length) {
     const current = lines[i];
     if (!current.trim()) { i++; continue; }
