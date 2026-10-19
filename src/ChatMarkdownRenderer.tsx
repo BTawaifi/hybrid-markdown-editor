@@ -89,8 +89,8 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
 
   while (i < source.length) {
     const c = source[i];
-    if (c === "\" && source[i + 1] === "(") {
-      const close = source.indexOf("\)", i + 2);
+    if (c === "\\" && source[i + 1] === "(") {
+      const close = source.indexOf("\\)", i + 2);
       if (close > i + 2) {
         const latex = source.slice(i + 2, close);
         emit(opts.renderMath ? opts.renderMath(latex, false) : renderBuiltInMath(latex, false));
@@ -303,9 +303,9 @@ function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
       add(<CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} />);
       continue;
     }
-    const mathStart = current.trim().startsWith("$$") ? "$$" : current.trim().startsWith("\[") ? "\[" : null;
+    const mathStart = current.trim().startsWith("$$") ? "$$" : current.trim().startsWith("\\[") ? "\\[" : null;
     if (mathStart) {
-      const mathEnd = mathStart === "$$" ? "$$" : "\]";
+      const mathEnd = mathStart === "$$" ? "$" : "\\]";
       let latex = current.trim().slice(mathStart.length);
       const closeOnOpeningLine = latex.indexOf(mathEnd);
       if (closeOnOpeningLine >= 0) {
