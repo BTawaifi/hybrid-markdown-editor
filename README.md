@@ -6,6 +6,64 @@ A lightweight, Obsidian-style Markdown editor for React. Inactive lines render a
 npm i hybrid-markdown-editor
 ```
 
+## Chat-style full-document Markdown rendering
+
+The original per-line hybrid editing behavior remains the default. For a rich, ChatGPT-inspired reading experience, use the new full-document renderer or opt into the editor's document preview.
+
+The renderer supports headings, paragraphs, emphasis, strikethrough, inline code, links, images, nested unordered/ordered lists, task lists, blockquotes, rules, GFM-style tables, fenced code blocks with copy controls, responsive table scrolling, and light/dark/system typography. It uses React elements instead of untrusted HTML injection, and disallows unsafe URL schemes.
+
+### Standalone, read-only display
+
+~~~tsx
+import { ChatMarkdownRenderer } from "hybrid-markdown-editor";
+
+<ChatMarkdownRenderer
+  markdown={"# Example\n\n| Feature | Status |\n| --- | --- |\n| Tables | Done |"}
+  theme="system" // "system" | "light" | "dark"
+/>
+~~~
+
+### Rich preview with inline editing
+
+~~~tsx
+import { useState } from "react";
+import { HybridMarkdownEditor } from "hybrid-markdown-editor";
+
+function Example() {
+  const [value, setValue] = useState("# Heading\n\nSome **bold** text.");
+
+  return (
+    <HybridMarkdownEditor
+      value={value}
+      onChange={setValue}
+      presentation="chatgpt"
+    />
+  );
+}
+~~~
+
+When `presentation="chatgpt"` is selected, the editor initially displays a full-document preview. Click **Edit** to enter the existing per-line source editor, or **Preview** to return to the rich preview. `readOnly` displays the full document with no edit button. The original default (`presentation="hybrid"`) retains the tested source-aware caret mapping, selection deletion, and other inline editing behaviors.
+
+For mathematical typesetting and colored syntax tokens, inject the renderer provided by your host application:
+
+~~~tsx
+<ChatMarkdownRenderer
+  markdown={value}
+  renderMath={(latex, display) =>
+    /* Pass LaTeX to your installed math renderer; return React nodes */
+    <span data-display={display}>{latex}</span>
+  }
+  highlightCode={(code, language) =>
+    /* Pass code to your syntax highlighter; return React nodes */
+    <code data-language={language}>{code}</code>
+  }
+/>
+~~~
+
+Without those optional hooks, math falls back to readable source notation and code blocks remain unhighlighted but retain their language label, formatting, and copy button.
+
+**Scope:** this is a ChatGPT-inspired CommonMark/GFM subset, not a copy of ChatGPT's private renderer. Raw HTML is shown as text rather than interpreted; advanced Markdown extensions, full TeX typesetting, and syntax coloring require dedicated integration. Large documents, highly complex nested blocks, and arbitrary edge cases may need an established Markdown AST parser. The chat-style preview is intentionally document-level rather than source-position-preserving; the standard hybrid mode is still the correct choice for per-line interactive selection and editing.
+
 ## Core contract
 
 `HybridMarkdownEditor` is a controlled component. **Every document mutation**—typing, Enter, list continuation, Backspace merges, indentation, multi-line paste, rendered selection deletion, and extension API edits—flows through the same change pipeline and calls `onChange(nextMarkdown)`.
@@ -42,6 +100,7 @@ Controlled value echoes from the parent do not cancel the pending local debounce
 - List indentation/dedentation
 - Multi-line rendered selection deletion
 - Inline `**bold**` preview with source-aware caret mapping
+- Optional chat-style full-document preview and standalone renderer
 - Distinct preview markers for unordered, ordered, checked, and unchecked task items
 - Extension hooks for keyboard, paste, prefix, and suffix behavior
 - Class and style hooks for root/content/line/preview/textarea/marker surfaces
