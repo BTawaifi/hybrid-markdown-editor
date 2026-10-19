@@ -12,7 +12,7 @@ The package includes a chat-style document renderer with built-in syntax colorin
 
 - **Math:** KaTeX typesets inline `$x^2$` / `\(x^2\)` and display `$$...$$` / `\[...\]` expressions into native MathML. This avoids separate stylesheets and font downloads, but appearance depends on the browser's MathML support.
 - **Code:** highlight.js colors fenced code for JavaScript/JSX, TypeScript/TSX, Python, Bash, JSON, CSS, XML/HTML, SQL, Go, Rust, YAML, Diff, and Markdown. Unknown languages remain readable plain text, and the copy button continues to work.
-- **Markdown:** headings, emphasis, strikethrough, inline code, links, images, nested lists, task checkboxes, blockquotes, horizontal rules, and scrollable GFM-style tables.
+- **Markdown:** headings, emphasis, strikethrough, inline code, links (including bare URLs), images, nested lists, task checkboxes, blockquotes, GitHub alerts (`> [!NOTE]` and friends), horizontal rules, and scrollable GFM-style tables.
 - **Appearance:** automatic light/dark/system typography and token colors.
 
 ### Read-only renderer
@@ -34,6 +34,8 @@ const markdown = [
 ~~~
 
 Rich rendering is enabled by default. Advanced callers can still supply `renderMath(latex, display)` or `highlightCode(code, language)` overrides.
+
+Task checkboxes (task lists and checklist/roadmap widget rows) can be clicked. By default they toggle locally and progress counters update; pass `onTaskToggle(line, checked)` to persist the change, where `line` is the 0-based line index in `markdown`.
 
 **Security:** raw HTML is escaped rather than executed, code highlighting escapes source tokens, unknown code languages render as React text, and KaTeX operates with `trust: false`. This is not a complete CommonMark parser. Native MathML requires browser support; advanced nested block edge cases may need a standards-compliant Markdown AST.
 
@@ -72,7 +74,13 @@ Controlled value echoes from the parent do not cancel the pending local debounce
 - Smart Backspace line joining and marker removal
 - List indentation/dedentation
 - Multi-line rendered selection deletion
-- Inline `**bold**` preview with source-aware caret mapping
+- Inactive lines render with the same renderer as the preview: full inline formatting, math, heading and list styles
+- Tables, fenced code, display math, widget fences and underlined headings render as blocks; clicking one edits the source line you clicked, and the whole block shows its source while you edit inside it
+- Click-to-caret mapping that follows the rendered text
+- Keyboard accessible: the editor is focusable, Enter starts editing, Escape stops editing so Tab can leave
+- Task checkboxes (task lists, checklist/roadmap widget rows, preview mode) toggle `[ ]` / `[x]` in the source
+- Large documents stay responsive: only the edited line and changed blocks re-render
+- Undo/redo with Ctrl/Cmd+Z and Ctrl+Shift+Z / Ctrl+Y (typing on a line merges into one step)
 - Optional chat-style full-document preview and standalone renderer
 - Distinct preview markers for unordered, ordered, checked, and unchecked task items
 - Extension hooks for keyboard, paste, prefix, and suffix behavior
@@ -214,11 +222,16 @@ Prefix/suffix render hooks run in both preview and active states and receive the
 ## Keyboard behavior
 
 - **Enter** splits at the current selection and optionally continues the current list/quote.
-- **Backspace at column 0** joins with the previous Markdown line.
-- **Backspace near a list marker** removes the marker before deleting content.
+- **Backspace at or near a list/quote marker** first removes the marker, turning the line into plain text.
+- **Backspace at column 0 of a plain line** joins it with the previous line.
 - **Tab / Shift+Tab** indent or dedent list/quote items.
 - **Arrow Up** moves to the previous Markdown line only when the caret is at source column 0.
 - **Arrow Down** moves to the next Markdown line only when the caret is at the end of the source line.
+- **Escape** stops editing and focuses the editor, so **Tab** moves on to the rest of the page.
+- **Enter** (or **F2**) on the focused editor resumes editing the last edited line.
+- **Ctrl/Cmd+Z** undoes, **Ctrl+Shift+Z** or **Ctrl+Y** redoes, while editing or with the editor focused.
+
+Links, copy buttons and widget controls inside rendered lines keep working and do not start editing; click elsewhere on the line to edit it.
 
 Keeping Arrow Up/Down native in the middle of the textarea avoids breaking normal navigation through visually wrapped text.
 

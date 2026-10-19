@@ -360,10 +360,10 @@ describe("HybridMarkdownEditor rendering and mapping", () => {
     const { container } = render(
       <HybridMarkdownEditor value={"- bullet\n7. ordered\n- [ ] todo\n- [x] done"} readOnly />
     );
-    const markers = Array.from(container.querySelectorAll('[data-role="line-marker"]')).map(
-      (node) => node.textContent
-    );
-    expect(markers).toEqual(["•", "7.", "☐", "☑"]);
+    const markers = Array.from(container.querySelectorAll('[data-role="line-marker"]'));
+    expect(markers.map((node) => node.textContent)).toEqual(["•", "7.", "", ""]);
+    // Task markers are real checkboxes, like the renderer's task lists.
+    expect(markers.slice(2).map((node) => (node.querySelector("input[type=checkbox]") as HTMLInputElement).checked)).toEqual([false, true]);
   });
 
   it("preserves list nesting visually through indentation", () => {

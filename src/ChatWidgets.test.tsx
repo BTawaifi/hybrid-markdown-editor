@@ -1,6 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
 
 const fenced = (info: string, body: string) => "```" + info + "\n" + body + "\n```";
@@ -90,5 +90,29 @@ describe("widget fences", () => {
     expect(plain.container.querySelector(".hme-callout .hme-w-title")?.textContent).toBe("Warning");
     const empty = render(<ChatMarkdownRenderer widgets markdown={fenced("callout", "")} />);
     expect(empty.container.querySelector(".hme-code-block")).toBeTruthy();
+  });
+});
+
+describe("widget and task checkboxes in the standalone renderer", () => {
+  it("toggle locally without a handler and update progress", () => {
+    const { container } = render(<ChatMarkdownRenderer widgets markdown={"- [ ] task\n\n" + fenced("roadmap", "- [ ] One\n- [ ] Two")} />);
+    const task = screen.getByRole("checkbox", { name: "Task completed" }) as HTMLInputElement;
+    fireEvent.click(task);
+    expect(task.checked).toBe(true);
+    fireEvent.click(container.querySelector(".hme-w-check")!);
+    expect(screen.getByText("50%")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1");
+  });
+
+  it("report source line numbers through onTaskToggle, including quotes and fences", () => {
+    const onTaskToggle = vi.fn();
+    const markdown = ["intro", "- [ ] a", "> - [x] quoted", "", fenced("checklist", "title: T\n- [ ] item")].join("\n");
+    const { container } = render(<ChatMarkdownRenderer widgets onTaskToggle={onTaskToggle} markdown={markdown} />);
+    const tasks = screen.getAllByRole("checkbox", { name: "Task completed" });
+    fireEvent.click(tasks[0]);
+    fireEvent.click(tasks[1]);
+    fireEvent.click(container.querySelector(".hme-w-check")!);
+    expect(onTaskToggle.mock.calls).toEqual([[1, true], [2, false], [6, true]]);
+    expect((tasks[0] as HTMLInputElement).checked).toBe(false); // controlled by the (unchanged) source
   });
 });
