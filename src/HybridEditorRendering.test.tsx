@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { alignDisplayToSource, findMarkdownBlocks, HybridMarkdownEditor } from "./HybridMarkdownEditor";
+import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
 
 const fence = "```";
 
@@ -174,5 +175,72 @@ describe("inline renderer fixes found by the kitchen-sink pass", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Section" })).toBeTruthy();
     const previews = container.querySelectorAll('[data-role="line-preview"]');
     expect((previews[3] as HTMLElement).style.paddingLeft).toBe("16px");
+  });
+});
+
+describe("undo and redo", () => {
+  const typeInto = (textarea: HTMLTextAreaElement, value: string) => fireEvent.change(textarea, { target: { value } });
+
+  it("merges rapid typing into one step and undoes/redoes structural edits", () => {
+    render(<Controlled initial={"first\nsecond"} />);
+    fireEvent.mouseUp(screen.getAllByText("second")[0]);
+    let textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    typeInto(textarea, "second!");
+    typeInto(textarea, "second!!");
+    textarea.setSelectionRange(0, 0);
+    fireEvent.select(textarea);
+    fireEvent.keyDown(textarea, { key: "Backspace" }); // join with "first"
+    expect(screen.getByTestId("value").textContent).toBe("firstsecond!!");
+
+    textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: "z", ctrlKey: true });
+    expect(screen.getByTestId("value").textContent).toBe("first\nsecond!!");
+    textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: "z", ctrlKey: true }); // both keystrokes are one step
+    expect(screen.getByTestId("value").textContent).toBe("first\nsecond");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("second");
+
+    textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(screen.getByTestId("value").textContent).toBe("first\nsecond!!");
+    textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: "y", ctrlKey: true });
+    expect(screen.getByTestId("value").textContent).toBe("firstsecond!!");
+  });
+
+  it("undoes task toggles and clears history when the value is replaced from outside", () => {
+    function Outer() {
+      const [value, setValue] = useState("- [ ] task");
+      return <>
+        <HybridMarkdownEditor value={value} onChange={setValue} />
+        <button type="button" onClick={() => setValue("replaced")}>replace</button>
+        <pre data-testid="v">{value}</pre>
+      </>;
+    }
+    const { container } = render(<Outer />);
+    fireEvent.click(container.querySelector('[data-role="line-marker"] input')!);
+    expect(screen.getByTestId("v").textContent).toBe("- [x] task");
+    const editor = container.querySelector(".hme-editor") as HTMLElement;
+    fireEvent.keyDown(editor, { key: "z", metaKey: true });
+    expect(screen.getByTestId("v").textContent).toBe("- [ ] task");
+    fireEvent.click(screen.getByText("replace"));
+    fireEvent.keyDown(container.querySelector(".hme-editor") as HTMLElement, { key: "z", ctrlKey: true });
+    expect(screen.getByTestId("v").textContent).toBe("replaced");
+  });
+});
+
+describe("GitHub alerts", () => {
+  it("render as titled alerts in the renderer and in hybrid mode", () => {
+    const md = ["> [!WARNING]", "> Back up **first**.", "", "> [!tip]", "> Small tip.", "", "> Plain quote"].join(String.fromCharCode(10));
+    const renderer = render(<ChatMarkdownRenderer markdown={md} />);
+    const alerts = renderer.container.querySelectorAll(".hme-alert");
+    expect([...alerts].map(a => a.className)).toEqual(["hme-alert is-warning", "hme-alert is-tip"]);
+    expect(alerts[0].querySelector(".hme-alert-title")?.textContent).toBe("Warning");
+    expect(alerts[0].querySelector("strong")?.textContent).toBe("first");
+    expect(renderer.container.querySelectorAll("blockquote")).toHaveLength(1);
+    renderer.unmount();
+    const hybrid = render(<HybridMarkdownEditor value={md} readOnly />);
+    expect(hybrid.container.querySelectorAll(".hme-alert")).toHaveLength(2);
+    expect(hybrid.container.textContent).not.toContain("[!WARNING]");
   });
 });

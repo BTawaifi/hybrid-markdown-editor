@@ -12,7 +12,7 @@ The package includes a chat-style document renderer with built-in syntax colorin
 
 - **Math:** KaTeX typesets inline `$x^2$` / `\(x^2\)` and display `$$...$$` / `\[...\]` expressions into native MathML. This avoids separate stylesheets and font downloads, but appearance depends on the browser's MathML support.
 - **Code:** highlight.js colors fenced code for JavaScript/JSX, TypeScript/TSX, Python, Bash, JSON, CSS, XML/HTML, SQL, Go, Rust, YAML, Diff, and Markdown. Unknown languages remain readable plain text, and the copy button continues to work.
-- **Markdown:** headings, emphasis, strikethrough, inline code, links, images, nested lists, task checkboxes, blockquotes, horizontal rules, and scrollable GFM-style tables.
+- **Markdown:** headings, emphasis, strikethrough, inline code, links (including bare URLs), images, nested lists, task checkboxes, blockquotes, GitHub alerts (`> [!NOTE]` and friends), horizontal rules, and scrollable GFM-style tables.
 - **Appearance:** automatic light/dark/system typography and token colors.
 
 ### Read-only renderer
@@ -80,6 +80,7 @@ Controlled value echoes from the parent do not cancel the pending local debounce
 - Keyboard accessible: the editor is focusable, Enter starts editing, Escape stops editing so Tab can leave
 - Task checkboxes (task lists, checklist/roadmap widget rows, preview mode) toggle `[ ]` / `[x]` in the source
 - Large documents stay responsive: only the edited line and changed blocks re-render
+- Undo/redo with Ctrl/Cmd+Z and Ctrl+Shift+Z / Ctrl+Y (typing on a line merges into one step)
 - Optional chat-style full-document preview and standalone renderer
 - Distinct preview markers for unordered, ordered, checked, and unchecked task items
 - Extension hooks for keyboard, paste, prefix, and suffix behavior
@@ -228,6 +229,7 @@ Prefix/suffix render hooks run in both preview and active states and receive the
 - **Arrow Down** moves to the next Markdown line only when the caret is at the end of the source line.
 - **Escape** stops editing and focuses the editor, so **Tab** moves on to the rest of the page.
 - **Enter** (or **F2**) on the focused editor resumes editing the last edited line.
+- **Ctrl/Cmd+Z** undoes, **Ctrl+Shift+Z** or **Ctrl+Y** redoes, while editing or with the editor focused.
 
 Links, copy buttons and widget controls inside rendered lines keep working and do not start editing; click elsewhere on the line to edit it.
 

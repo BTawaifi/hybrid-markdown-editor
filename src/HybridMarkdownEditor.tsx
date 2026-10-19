@@ -718,6 +718,11 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   const draggingFromTextareaRef = useRef(false);
   const bridgingSelectionRef = useRef(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Undo/redo history of whole-document snapshots, with where the caret was for each.
+  type Snapshot = { lines: string[]; line: number | null; caret: number | null };
+  const historyRef = useRef<{ past: Snapshot[]; future: Snapshot[]; group: string | null; at: number }>({
+    past: [], future: [], group: null, at: 0,
+  });
   const onChangeRef = useRef(onChange);
   const onDebouncedChangeRef = useRef(onDebouncedChange);
   const debounceMsRef = useRef(debounceMs);
@@ -742,6 +747,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     const incoming = (value || "").split("\n");
     const current = linesRef.current.join("\n");
     if (current === (value || "")) return;
+    // A genuinely different external value: earlier snapshots no longer apply.
+    historyRef.current = { past: [], future: [], group: null, at: 0 };
     linesRef.current = incoming;
     setLines(incoming);
     setActiveLineIndex((currentIndex) =>
@@ -774,7 +781,23 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     }, Math.max(0, debounceMsRef.current));
   };
 
-  const commitLines = (nextOrUpdater: string[] | ((prev: string[]) => string[])) => {
+  const currentSnapshot = (lines: string[]): Snapshot => {
+    const active = contentRef.current?.querySelector("textarea");
+    return {
+      lines,
+      line: active ? lastActiveLineRef.current : null,
+      caret: active && document.activeElement === active ? active.selectionStart : null,
+    };
+  };
+
+  /**
+   * Every document mutation goes through here. `group` merges rapid edits of the same kind
+   * (typing on one line) into a single undo step; `record: false` is used by undo/redo.
+   */
+  const commitLines = (
+    nextOrUpdater: string[] | ((prev: string[]) => string[]),
+    { group, record = true }: { group?: string; record?: boolean } = {}
+  ) => {
     if (readOnly) return linesRef.current;
     const prev = linesRef.current;
     const nextRaw = typeof nextOrUpdater === "function" ? nextOrUpdater(prev) : nextOrUpdater;
@@ -782,6 +805,17 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     const previousContent = prev.join("\n");
     const content = next.join("\n");
     if (content === previousContent) return prev;
+    if (record) {
+      const history = historyRef.current;
+      const now = Date.now();
+      if (!group || group !== history.group || now - history.at > 1000) {
+        history.past.push(currentSnapshot(prev));
+        if (history.past.length > 200) history.past.shift();
+      }
+      history.future = [];
+      history.group = group ?? null;
+      history.at = now;
+    }
     linesRef.current = next;
     setLines(next);
     onChangeRef.current?.(content);
@@ -965,7 +999,27 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
       const next = [...prev];
       next[index] = nextValue;
       return next;
-    });
+    }, { group: `type:${index}` });
+  };
+
+  /** Undo (or redo) one step and put the caret back where that edit happened. */
+  const stepHistory = (redo: boolean) => {
+    const history = historyRef.current;
+    const target = (redo ? history.future : history.past).pop();
+    if (!target || readOnly) return;
+    (redo ? history.past : history.future).push(currentSnapshot(linesRef.current));
+    history.group = null;
+    commitLines(target.lines, { record: false });
+    if (target.line !== null) {
+      const line = Math.min(target.line, target.lines.length - 1);
+      requestFocus(line, target.caret ?? (target.lines[line] ?? "").length);
+    }
+  };
+  const isUndoKey = (event: React.KeyboardEvent) =>
+    (event.ctrlKey || event.metaKey) && !event.altKey && ["z", "y"].includes(event.key.toLowerCase());
+  const handleUndoKey = (event: React.KeyboardEvent) => {
+    event.preventDefault();
+    stepHistory(event.key.toLowerCase() === "y" || event.shiftKey);
   };
 
   const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>, index: number) => {
@@ -1025,6 +1079,11 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     const hasSelection = selectionEnd > selectionStart;
     const currentLines = linesRef.current;
     const line = currentLines[index] ?? "";
+
+    if (isUndoKey(event)) {
+      handleUndoKey(event);
+      return;
+    }
 
     if (event.key === "Escape") {
       // Leave line editing so Tab moves focus out of the editor again (no keyboard trap).
@@ -1330,6 +1389,10 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
         aria-describedby={readOnly ? undefined : hintId}
         onKeyDown={(event) => {
           if (readOnly || activeLineIndex !== null || event.target !== event.currentTarget) return;
+          if (isUndoKey(event)) {
+            handleUndoKey(event);
+            return;
+          }
           if (event.key === "Enter" || event.key === "F2") {
             event.preventDefault();
             const index = Math.min(lastActiveLineRef.current, linesRef.current.length - 1);

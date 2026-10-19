@@ -46,6 +46,8 @@ const markdownCss = [
   ".hme-chat-markdown ul,.hme-chat-markdown ol{padding-left:2em;margin:.5em 0 0}.hme-chat-markdown li{margin:0}.hme-chat-markdown li>ul,.hme-chat-markdown li>ol{margin:0}",
   ".hme-chat-markdown li.hme-task{list-style:none;margin-left:-1.4em}.hme-chat-markdown .hme-checkbox{accent-color:#17803d;margin:0 .6em 0 0;width:1em;height:1em;vertical-align:-.08em}",
   ".hme-chat-markdown blockquote{border-left:2px solid var(--hme-rule);padding:0 0 0 1em;margin:1em 0 0;color:var(--hme-muted)}",
+  ".hme-chat-markdown .hme-alert{--hme-alert:var(--hme-link);border-left:3px solid var(--hme-alert);padding:.25em 0 .25em 1em;margin:1em 0 0}.hme-chat-markdown .hme-alert>:nth-child(2){margin-top:.25em}",
+  ".hme-chat-markdown .hme-alert-title{margin:0;font-weight:600;color:var(--hme-alert)}.hme-chat-markdown .hme-alert.is-tip{--hme-alert:#17803d}.hme-chat-markdown .hme-alert.is-important{--hme-alert:#8250df}.hme-chat-markdown .hme-alert.is-warning{--hme-alert:#b06a12}.hme-chat-markdown .hme-alert.is-caution{--hme-alert:#c0392b}",
   ".hme-chat-markdown hr{border:0;height:1px;background:var(--hme-rule);margin:1em 0 0}",
   ".hme-chat-markdown :not(pre)>code{background:var(--hme-code);border-radius:.25em;padding:.04em .28em;font: .8125em/1.5 ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;white-space:break-spaces}",
   ".hme-chat-markdown .hme-code-block{border:1px solid var(--hme-border);border-radius:24px;overflow:hidden;margin:1em 0 0;background:var(--hme-panel)}",
@@ -406,6 +408,15 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
       const quoteOpts = { ...opts, lineBase: (opts.lineBase ?? 0) + i };
       while (i < lines.length && quote.test(lines[i])) {
         quoted.push(lines[i++].replace(quote, ""));
+      }
+      // GitHub alerts: "> [!NOTE]" (TIP, IMPORTANT, WARNING, CAUTION) on the first quote line.
+      const alert = quoted[0]?.trim().match(/^\[!(note|tip|important|warning|caution)\]$/i)?.[1].toLowerCase();
+      if (alert && depth < 24) {
+        add(<div className={`hme-alert is-${alert}`} role="note">
+          <p className="hme-alert-title">{alert[0].toUpperCase() + alert.slice(1)}</p>
+          {renderBlocks(quoted.slice(1), { ...quoteOpts, lineBase: quoteOpts.lineBase + 1 }, depth + 1)}
+        </div>);
+        continue;
       }
       add(<blockquote>{depth >= 24 ? <p>{quoted.join(" ")}</p> : renderBlocks(quoted, quoteOpts, depth + 1)}</blockquote>);
       continue;
