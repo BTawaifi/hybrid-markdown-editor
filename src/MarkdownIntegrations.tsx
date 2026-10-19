@@ -49,6 +49,8 @@ const aliases: Record<string, keyof typeof grammars> = {
  * limiting input-driven HTML commands and links.
  */
 export function renderBuiltInMath(latex: string, display: boolean): React.ReactNode {
+  // Hard limit prevents expensive synchronous parsing of untrusted expressions.
+  if (latex.length > 8192) return <span className="hme-math-fallback">{latex}</span>;
   try {
     const markup = katex.renderToString(latex, {
       displayMode: display,
@@ -77,7 +79,7 @@ export function renderBuiltInMath(latex: string, display: boolean): React.ReactN
 export function renderBuiltInHighlight(code: string, language: string): React.ReactNode {
   const label = language.toLowerCase();
   const grammar = aliases[label] ?? label;
-  if (!Object.prototype.hasOwnProperty.call(grammars, grammar)) return code;
+  if (code.length > 100000 || !Object.prototype.hasOwnProperty.call(grammars, grammar)) return code;
 
   try {
     const html = hljs.highlight(code, { language: grammar, ignoreIllegals: true }).value;
