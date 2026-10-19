@@ -29,7 +29,7 @@ $$
       "", tick + "mysterylang", "hello <world>", tick,
     ].join("\n");
     const { container } = render(<ChatMarkdownRenderer markdown={content} theme="dark" />);
-    expect(container.getAttribute("data-theme")).toBe("dark");
+    expect(container.querySelector(".hme-chat-markdown")?.getAttribute("data-theme")).toBe("dark");
     const blocks = container.querySelectorAll("pre code");
     expect(blocks).toHaveLength(2);
     expect(blocks[0].textContent).toContain("const value");
