@@ -6,6 +6,37 @@ A lightweight, Obsidian-style Markdown editor for React. Inactive lines render a
 npm i hybrid-markdown-editor
 ```
 
+## Rich full-document Markdown rendering
+
+The package includes a chat-style document renderer with built-in syntax coloring and mathematical typesetting, in addition to the source-aware hybrid editor. No extra installation or renderer callbacks are required.
+
+- **Math:** KaTeX typesets inline `$x^2$` / `\(x^2\)` and display `$$...$$` / `\[...\]` expressions into native MathML. This avoids separate stylesheets and font downloads, but appearance depends on the browser's MathML support.
+- **Code:** highlight.js colors fenced code for JavaScript/JSX, TypeScript/TSX, Python, Bash, JSON, CSS, XML/HTML, SQL, Go, Rust, YAML, Diff, and Markdown. Unknown languages remain readable plain text, and the copy button continues to work.
+- **Markdown:** headings, emphasis, strikethrough, inline code, links, images, nested lists, task checkboxes, blockquotes, horizontal rules, and scrollable GFM-style tables.
+- **Appearance:** automatic light/dark/system typography and token colors.
+
+### Read-only renderer
+
+~~~tsx
+import { ChatMarkdownRenderer } from "hybrid-markdown-editor";
+
+const markdown = [
+  "# Calculations",
+  "",
+  "Euler's identity: $e^{i\\pi}+1=0$",
+  "",
+  "~~~ts",
+  "const result: number = 42;",
+  "~~~",
+].join("\n");
+
+<ChatMarkdownRenderer markdown={markdown} theme="system" />;
+~~~
+
+Rich rendering is enabled by default. Advanced callers can still supply `renderMath(latex, display)` or `highlightCode(code, language)` overrides.
+
+**Security:** raw HTML is escaped rather than executed, code highlighting escapes source tokens, unknown code languages render as React text, and KaTeX operates with `trust: false`. This is not a complete CommonMark parser. Native MathML requires browser support; advanced nested block edge cases may need a standards-compliant Markdown AST.
+
 ## Core contract
 
 `HybridMarkdownEditor` is a controlled component. **Every document mutation**—typing, Enter, list continuation, Backspace merges, indentation, multi-line paste, rendered selection deletion, and extension API edits—flows through the same change pipeline and calls `onChange(nextMarkdown)`.
@@ -42,6 +73,7 @@ Controlled value echoes from the parent do not cancel the pending local debounce
 - List indentation/dedentation
 - Multi-line rendered selection deletion
 - Inline `**bold**` preview with source-aware caret mapping
+- Optional chat-style full-document preview and standalone renderer
 - Distinct preview markers for unordered, ordered, checked, and unchecked task items
 - Extension hooks for keyboard, paste, prefix, and suffix behavior
 - Class and style hooks for root/content/line/preview/textarea/marker surfaces

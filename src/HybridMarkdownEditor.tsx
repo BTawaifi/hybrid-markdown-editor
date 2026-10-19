@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
+import { ChatMarkdownRenderer, type ChatMarkdownRendererProps } from "./ChatMarkdownRenderer";
 
 type TextareaStyle = React.ComponentProps<typeof TextareaAutosize>["style"];
 
@@ -47,6 +48,10 @@ export interface HybridMarkdownEditorProps {
   debounceMs?: number;
   className?: string;
   readOnly?: boolean;
+  /** Optional full-document preview with chat-style typography; hybrid preserves legacy per-line previews. */
+  presentation?: "hybrid" | "preview";
+  /** Appearance and renderer hooks for the preview presentation. */
+  chatMarkdownProps?: Omit<ChatMarkdownRendererProps, "markdown">;
   classNames?: {
     root?: string;
     content?: string;
@@ -216,7 +221,7 @@ const buildVisibleSourceIndices = (line: string): { indices: number[]; end: numb
 export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
   const { indices, end } = buildVisibleSourceIndices(line);
   if (indices.length === 0) return end;
-  const offset = Math.max(0, Math.floor(displayOffset));
+  const offset = Number.isFinite(displayOffset) ? Math.max(0, Math.floor(displayOffset)) : 0;
   if (offset >= indices.length) return end;
   return indices[offset];
 };
@@ -224,7 +229,7 @@ export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: numbe
 const mapSourceIndexToDisplayOffset = (line: string, sourceIndex: number): number => {
   const { indices } = buildVisibleSourceIndices(line);
   if (indices.length === 0) return 0;
-  const target = Math.max(0, sourceIndex);
+  const target = Number.isFinite(sourceIndex) ? Math.max(0, sourceIndex) : 0;
   const found = indices.findIndex((index) => index >= target);
   return found === -1 ? indices.length : found;
 };
@@ -474,6 +479,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   debounceMs = 1000,
   className,
   readOnly = false,
+  presentation = "hybrid",
+  chatMarkdownProps,
   classNames,
   styles,
   renderLine,
@@ -935,11 +942,23 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [readOnly]);
 
+  if (presentation === "preview" && (readOnly || activeLineIndex === null)) {
+    return (
+      <div className={cx(className, classNames?.root)} style={{ position: "relative", ...styles?.root }}>
+        {!readOnly && <button type="button" aria-label="Edit Markdown" onClick={() => requestFocus(0, 0)} style={{ float: "right", cursor: "pointer", marginBottom: 12, padding: "6px 12px", borderRadius: 8, border: "1px solid currentColor", background: "transparent", color: "inherit" }}>Edit</button>}
+        <ChatMarkdownRenderer {...chatMarkdownProps} markdown={lines.join("\n")} />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cx(className, classNames?.root)}
       style={{ position: "relative", display: "flex", flexDirection: "column", ...styles?.root }}
     >
+      {presentation === "preview" && !readOnly && (
+        <button type="button" aria-label="Preview Markdown" onClick={() => setActiveLineIndex(null)} style={{ alignSelf: "flex-end", cursor: "pointer", marginBottom: 12, padding: "6px 12px", borderRadius: 8, border: "1px solid currentColor", background: "transparent", color: "inherit" }}>Preview</button>
+      )}
       <div
         ref={contentRef}
         className={cx(classNames?.content)}
