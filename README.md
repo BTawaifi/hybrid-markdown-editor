@@ -72,7 +72,10 @@ Controlled value echoes from the parent do not cancel the pending local debounce
 - Smart Backspace line joining and marker removal
 - List indentation/dedentation
 - Multi-line rendered selection deletion
-- Inline `**bold**` preview with source-aware caret mapping
+- Inactive lines render with the same renderer as the preview: full inline formatting, math, heading and list styles
+- Tables, fenced code, display math, widget fences and underlined headings render as blocks; clicking one edits the source line you clicked, and the whole block shows its source while you edit inside it
+- Click-to-caret mapping that follows the rendered text
+- Keyboard accessible: the editor is focusable, Enter starts editing, Escape stops editing so Tab can leave
 - Optional chat-style full-document preview and standalone renderer
 - Distinct preview markers for unordered, ordered, checked, and unchecked task items
 - Extension hooks for keyboard, paste, prefix, and suffix behavior
@@ -214,11 +217,15 @@ Prefix/suffix render hooks run in both preview and active states and receive the
 ## Keyboard behavior
 
 - **Enter** splits at the current selection and optionally continues the current list/quote.
-- **Backspace at column 0** joins with the previous Markdown line.
-- **Backspace near a list marker** removes the marker before deleting content.
+- **Backspace at or near a list/quote marker** first removes the marker, turning the line into plain text.
+- **Backspace at column 0 of a plain line** joins it with the previous line.
 - **Tab / Shift+Tab** indent or dedent list/quote items.
 - **Arrow Up** moves to the previous Markdown line only when the caret is at source column 0.
 - **Arrow Down** moves to the next Markdown line only when the caret is at the end of the source line.
+- **Escape** stops editing and focuses the editor, so **Tab** moves on to the rest of the page.
+- **Enter** (or **F2**) on the focused editor resumes editing the last edited line.
+
+Links, copy buttons and widget controls inside rendered lines keep working and do not start editing; click elsewhere on the line to edit it.
 
 Keeping Arrow Up/Down native in the middle of the textarea avoids breaking normal navigation through visually wrapped text.
 

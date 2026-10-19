@@ -1,8 +1,15 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
-import { ChatMarkdownRenderer, type ChatMarkdownRendererProps } from "./ChatMarkdownRenderer";
+import {
+  ChatMarkdownRenderer,
+  chatMarkdownCss,
+  renderMarkdownBlocks,
+  renderMarkdownInline,
+  type ChatMarkdownRendererProps,
+  type MarkdownRenderOptions,
+} from "./ChatMarkdownRenderer";
 
 type TextareaStyle = React.ComponentProps<typeof TextareaAutosize>["style"];
 
@@ -48,9 +55,9 @@ export interface HybridMarkdownEditorProps {
   debounceMs?: number;
   className?: string;
   readOnly?: boolean;
-  /** Optional full-document preview with chat-style typography; hybrid preserves legacy per-line previews. */
+  /** "hybrid" renders inactive lines and blocks like the renderer; "preview" shows the whole document rendered. */
   presentation?: "hybrid" | "preview";
-  /** Appearance and renderer hooks for the preview presentation. */
+  /** Renderer options (theme, widgets, math/code hooks) used by both presentations. */
   chatMarkdownProps?: Omit<ChatMarkdownRendererProps, "markdown">;
   classNames?: {
     root?: string;
@@ -226,16 +233,6 @@ export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: numbe
   return indices[offset];
 };
 
-const mapSourceIndexToDisplayOffset = (line: string, sourceIndex: number): number => {
-  const { indices } = buildVisibleSourceIndices(line);
-  if (indices.length === 0) return 0;
-  const target = Number.isFinite(sourceIndex) ? Math.max(0, sourceIndex) : 0;
-  const found = indices.findIndex((index) => index >= target);
-  return found === -1 ? indices.length : found;
-};
-
-const getDisplayContentLength = (line: string): number => buildVisibleSourceIndices(line).indices.length;
-
 const getFallbackDisplayOffset = (container: HTMLElement, clientX: number): number => {
   const rect = container.getBoundingClientRect();
   const textLen = container.textContent?.length ?? 0;
@@ -302,6 +299,114 @@ const getListMarker = (line: string): string | null => {
   return null;
 };
 
+/**
+ * Maps each character of rendered text back to its source index by matching characters in
+ * order. Markup the renderer hides (**, `, link targets, escapes) is skipped; characters the
+ * renderer adds (MathML, placeholders) keep the current position.
+ */
+export const alignDisplayToSource = (source: string, display: string): number[] => {
+  const indices: number[] = [];
+  let cursor = 0;
+  for (const char of display) {
+    let found = cursor;
+    while (found < source.length && source[found] !== char) found += 1;
+    if (found >= source.length) {
+      indices.push(Math.min(cursor, source.length));
+      continue;
+    }
+    indices.push(found);
+    cursor = found + 1;
+  }
+  return indices;
+};
+
+type Block = { start: number; end: number };
+const FENCE_OPEN_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
+const TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+const SETEXT_REGEX = /^\s{0,3}(=+|-+)\s*$/;
+const INDENTED_CODE_REGEX = /^(?: {4}|\t)(?=\s*\S)/;
+
+/**
+ * Multi-line constructs that only render correctly as a whole: fenced code (including widget
+ * fences), display math, tables and setext headings. Everything else stays line by line.
+ */
+export const findMarkdownBlocks = (lines: string[]): Block[] => {
+  const blocks: Block[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const fence = line.match(FENCE_OPEN_REGEX);
+    if (fence) {
+      const marker = fence[1];
+      let end = i + 1;
+      while (end < lines.length && !(lines[end].trim().length >= marker.length && [...lines[end].trim()].every((c) => c === marker[0]))) end += 1;
+      blocks.push({ start: i, end: Math.min(end, lines.length - 1) });
+      i = end;
+      continue;
+    }
+    const trimmed = line.trim();
+    const mathClose = trimmed === "$$" ? "$$" : trimmed === "\\[" ? "\\]" : null;
+    if (mathClose) {
+      let end = i + 1;
+      while (end < lines.length && lines[end].trim() !== mathClose) end += 1;
+      blocks.push({ start: i, end: Math.min(end, lines.length - 1) });
+      i = end;
+      continue;
+    }
+    if (line.includes("|") && TABLE_SEPARATOR_REGEX.test(lines[i + 1] ?? "") && (lines[i + 1] ?? "").includes("-")) {
+      let end = i + 1;
+      while (end + 1 < lines.length && lines[end + 1].trim() && lines[end + 1].includes("|")) end += 1;
+      blocks.push({ start: i, end });
+      i = end;
+      continue;
+    }
+    // Indented code: starts after a blank line, outside list content, and runs while lines stay
+    // indented (blank lines inside are kept, trailing ones are not).
+    const previousContent = lines.slice(0, i).reverse().find((l) => l.trim()) ?? "";
+    if (INDENTED_CODE_REGEX.test(line) && !(lines[i - 1] ?? "").trim() && !LI_UL_REGEX.test(previousContent) && !LI_OL_REGEX.test(previousContent) && !INDENTED_CODE_REGEX.test(previousContent)) {
+      let end = i;
+      for (let next = i + 1; next < lines.length; next += 1) {
+        if (INDENTED_CODE_REGEX.test(lines[next])) end = next;
+        else if (lines[next].trim()) break;
+      }
+      blocks.push({ start: i, end });
+      i = end;
+      continue;
+    }
+    if (trimmed && !MARKDOWN_PREFIX_REGEX.test(line) && SETEXT_REGEX.test(lines[i + 1] ?? "") && !(lines[i - 1] ?? "").trim()) {
+      blocks.push({ start: i, end: i + 1 });
+      i += 1;
+    }
+  }
+  return blocks;
+};
+
+const editorCss = [
+  ".hme-editor{line-height:1.625}.hme-editor:focus-visible{outline:2px solid var(--hme-link);outline-offset:4px;border-radius:6px}",
+  ".hme-editor .hme-line{min-height:1.625em}.hme-editor .hme-line [data-role=source-content]{flex:1;min-width:0;overflow-wrap:anywhere}",
+  ".hme-editor .hme-line-h1{font-size:1.25em;font-weight:600;line-height:1.4;margin-top:.5em}.hme-editor .hme-line-h2{font-size:1.125em;font-weight:600;margin-top:.4em}",
+  ".hme-editor .hme-line-h3,.hme-editor .hme-line-h4{font-weight:600;margin-top:.3em}.hme-editor .hme-line [data-role=line-marker]{color:var(--hme-muted);font-variant-emoji:text}",
+  ".hme-editor .hme-line-blockquote{color:var(--hme-muted)}.hme-editor textarea{font:inherit;color:inherit;letter-spacing:inherit;line-height:inherit}",
+  ".hme-editor .hme-line-raw{font:.875em/1.7 ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;color:var(--hme-muted);white-space:pre-wrap}",
+  ".hme-editor .hme-block{cursor:text}.hme-editor .hme-block>:first-child{margin-top:0}.hme-editor .hme-block+.hme-line{margin-top:.25em}",
+  ".hme-sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}",
+].join("\n");
+
+/** Controls inside rendered content (links, copy buttons, widget inputs) keep their own behaviour. */
+const isInteractiveTarget = (target: EventTarget): boolean =>
+  !!(target as HTMLElement).closest?.("a,button,input,label,select,textarea,summary");
+
+/** Which source line a click inside a rendered block belongs to. */
+const lineFromBlockClick = (target: HTMLElement, block: Block, lines: string[]): number => {
+  const row = target.closest("tr");
+  if (row) {
+    const inHead = !!row.closest("thead");
+    const bodyIndex = row.parentElement ? Array.from(row.parentElement.children).indexOf(row) : 0;
+    return Math.min(block.end, inHead ? block.start : block.start + 2 + bodyIndex);
+  }
+  if (FENCE_OPEN_REGEX.test(lines[block.start] ?? "")) return Math.min(block.end, block.start + 1);
+  return block.start;
+};
+
 const EditorLine: React.FC<{
   index: number;
   line: string;
@@ -319,6 +424,9 @@ const EditorLine: React.FC<{
   renderLine?: HybridMarkdownEditorProps["renderLine"];
   extensionsPrefix?: EditorExtension[];
   extensionsSuffix?: EditorExtension[];
+  /** Line belongs to the block being edited: show its source as-is. */
+  raw: boolean;
+  renderOptions: MarkdownRenderOptions;
 }> = ({
   index,
   line,
@@ -336,12 +444,14 @@ const EditorLine: React.FC<{
   renderLine,
   extensionsPrefix,
   extensionsSuffix,
+  raw,
+  renderOptions,
 }) => {
   const type = getMarkdownType(line);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listMeta = type === "li" || type === "blockquote" ? getListMeta(line) : null;
-  const marker = getListMarker(line);
-  const indentPx = listMeta ? Math.min(160, listMeta.indent.replace(/\t/g, "  ").length * 8) : 0;
+  const marker = raw ? null : getListMarker(line);
+  const indentPx = listMeta && !raw ? Math.min(160, listMeta.indent.replace(/\t/g, "  ").length * 8) : 0;
 
   useEffect(() => {
     if (!isActive || readOnly || !textareaRef.current) return;
@@ -370,17 +480,23 @@ const EditorLine: React.FC<{
       ? classNames.line({ index, type, isActive })
       : classNames?.line || "";
 
-  const sourceContent = line.replace(MARKDOWN_PREFIX_REGEX, "");
+  const prefixLength = raw ? 0 : getRemovedPrefixLength(line);
+  const sourceContent = line.slice(prefixLength);
   const defaultContent = (
     <span data-role="source-content">
-      {line.trim() === "" ? "\u00A0" : parseBold(sourceContent)}
+      {line.trim() === "" ? "\u00A0" : raw ? line : renderMarkdownInline(sourceContent, renderOptions)}
     </span>
   );
+  // Caret target for a click at rendered character `offset` (end of line past the last char).
+  const sourceIndexAt = (sourceEl: HTMLElement, offset: number): number => {
+    const indices = alignDisplayToSource(sourceContent, sourceEl.textContent ?? "");
+    return offset >= indices.length ? line.length : prefixLength + indices[offset];
+  };
 
   return (
     <div
       data-line-index={index}
-      className={cx(typeClass, activeClass, customLineClass)}
+      className={cx("hme-line", `hme-line-${type}`, raw && "hme-line-raw", typeClass, activeClass, customLineClass)}
       style={{ position: "relative", width: "100%", userSelect: "text", ...styles?.line }}
     >
       {isActive && !readOnly ? (
@@ -434,7 +550,7 @@ const EditorLine: React.FC<{
             ...styles?.preview,
           }}
           onMouseUp={(event) => {
-            if (readOnly) return;
+            if (readOnly || isInteractiveTarget(event.target)) return;
             const selection = window.getSelection();
             if (selection && !selection.isCollapsed && selection.toString().length > 0) return;
 
@@ -445,7 +561,7 @@ const EditorLine: React.FC<{
               return;
             }
             const offset = getClickDisplayOffset(sourceEl, event.clientX, event.clientY);
-            onActivate(mapDisplayOffsetToSourceIndex(line, offset));
+            onActivate(line.trim() === "" ? 0 : sourceIndexAt(sourceEl, offset));
           }}
         >
           {extensionsPrefix?.map((ext, extIndex) => (
@@ -491,10 +607,12 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   const [lines, setLines] = useState<string[]>(initialLines);
   const linesRef = useRef<string[]>(initialLines);
   const [activeLineIndex, setActiveLineIndex] = useState<number | null>(null);
+  const lastActiveLineRef = useRef(0);
+  const hintId = useId();
   const [focusVersion, setFocusVersion] = useState(0);
   const cursorPositionRef = useRef<number | null>(null);
   const isSelectingRef = useRef(false);
-  const selectionAnchorRef = useRef<{ index: number; displayOffset: number } | null>(null);
+  const selectionAnchorRef = useRef<{ index: number; displayOffset: number; sourceIndex?: number } | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const draggingFromTextareaRef = useRef(false);
   const bridgingSelectionRef = useRef(false);
@@ -576,8 +694,41 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     const safeIndex = index === null
       ? null
       : Math.max(0, Math.min(linesRef.current.length - 1, index));
+    if (safeIndex !== null) lastActiveLineRef.current = safeIndex;
     setActiveLineIndex(safeIndex);
     setFocusVersion((version) => version + 1);
+  };
+
+  const renderOptions: MarkdownRenderOptions = {
+    renderMath: chatMarkdownProps?.renderMath,
+    highlightCode: chatMarkdownProps?.highlightCode,
+    widgets: chatMarkdownProps?.widgets,
+  };
+
+  // Display <-> source mapping against the rendered DOM of a line (matches what the user sees).
+  const lineSourceText = (index: number): { line: string; prefix: number } => {
+    const line = linesRef.current[index] ?? "";
+    const isRaw = !!contentRef.current?.querySelector(`[data-line-index="${index}"].hme-line-raw`);
+    return { line, prefix: isRaw ? 0 : getRemovedPrefixLength(line) };
+  };
+  const displayToSource = (index: number, displayOffset: number): number => {
+    const el = getSourceElementByIndex(index);
+    const { line, prefix } = lineSourceText(index);
+    if (!el || line.trim() === "") return displayOffset <= 0 ? 0 : line.length;
+    const indices = alignDisplayToSource(line.slice(prefix), el.textContent ?? "");
+    return displayOffset >= indices.length ? line.length : prefix + indices[Math.max(0, displayOffset)];
+  };
+  const sourceToDisplay = (index: number, sourceIndex: number): number => {
+    const el = getSourceElementByIndex(index);
+    const { line, prefix } = lineSourceText(index);
+    if (!el || line.trim() === "") return 0;
+    const indices = alignDisplayToSource(line.slice(prefix), el.textContent ?? "");
+    const found = indices.findIndex((value) => prefix + value >= sourceIndex);
+    return found === -1 ? indices.length : found;
+  };
+  const displayLength = (index: number): number => {
+    const { line } = lineSourceText(index);
+    return line.trim() === "" ? 0 : getSourceElementByIndex(index)?.textContent?.length ?? 0;
   };
 
   const extensionsWithKeyDown = useMemo(
@@ -760,6 +911,14 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     const currentLines = linesRef.current;
     const line = currentLines[index] ?? "";
 
+    if (event.key === "Escape") {
+      // Leave line editing so Tab moves focus out of the editor again (no keyboard trap).
+      event.preventDefault();
+      setActiveLineIndex(null);
+      setTimeout(() => contentRef.current?.focus(), 0);
+      return;
+    }
+
     if (event.key === "Enter") {
       event.preventDefault();
       const meta = getListMeta(line);
@@ -791,7 +950,12 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
       return;
     }
 
-    if (event.key === "Backspace" && !hasSelection && selectionStart === 0 && index > 0) {
+    // At the start of a list/quote line, Backspace first turns it into a plain line; only a
+    // plain line joins the previous one, so markers never end up mid-line.
+    const markerMeta = event.key === "Backspace" && !hasSelection ? getListMeta(line) : null;
+    const removesMarker = !!markerMeta?.kind && markerMeta.currentMarker.length > 0 && selectionStart <= markerMeta.currentMarker.length;
+
+    if (event.key === "Backspace" && !hasSelection && selectionStart === 0 && index > 0 && !removesMarker) {
       event.preventDefault();
       const previousLength = currentLines[index - 1].length;
       commitLines((prev) => {
@@ -904,9 +1068,9 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     const startLine = currentLines[startIndex] ?? "";
     const endLine = currentLines[endIndex] ?? "";
     const startIsLineStart = startDisplay === 0;
-    const endIsLineEnd = endDisplay >= getDisplayContentLength(endLine);
-    const startSource = mapDisplayOffsetToSourceIndex(startLine, startDisplay);
-    const endSource = endIsLineEnd ? endLine.length : mapDisplayOffsetToSourceIndex(endLine, endDisplay);
+    const endIsLineEnd = endDisplay >= displayLength(endIndex);
+    const startSource = displayToSource(startIndex, startDisplay);
+    const endSource = endIsLineEnd ? endLine.length : displayToSource(endIndex, endDisplay);
 
     const nextLines = commitLines((prev) => {
       const next = [...prev];
@@ -951,18 +1115,89 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
     );
   }
 
+  const blocks = findMarkdownBlocks(lines);
+  const blockAt = new Map(blocks.map((block) => [block.start, block]));
+  const inActiveBlock = (index: number) =>
+    activeLineIndex !== null && blocks.some((b) => b.start <= index && index <= b.end && b.start <= activeLineIndex && activeLineIndex <= b.end);
+  const lineProps = (index: number, line: string, raw: boolean) => ({
+    index,
+    line,
+    isActive: activeLineIndex === index,
+    readOnly,
+    focusVersion,
+    onUpdate: (event: React.ChangeEvent<HTMLTextAreaElement>) => handleLineChange(index, event.target.value),
+    onActivate: (caret?: number | null) => requestFocus(index, caret),
+    onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => handleKeyDown(event, index),
+    onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => handlePaste(event, index),
+    cursorPositionRef,
+    isSelectingRef,
+    classNames,
+    styles,
+    renderLine,
+    extensionsPrefix: extensionsWithPrefix,
+    extensionsSuffix: extensionsWithSuffix,
+    raw,
+    renderOptions,
+  });
+  const rows: React.ReactNode[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const block = blockAt.get(index);
+    if (block && !inActiveBlock(index)) {
+      rows.push(
+        <div
+          key={`block-${index}`}
+          className="hme-block"
+          data-block-start={block.start}
+          data-block-end={block.end}
+          onMouseUp={(event) => {
+            if (readOnly || isInteractiveTarget(event.target)) return;
+            const selection = window.getSelection();
+            if (selection && !selection.isCollapsed && selection.toString().length > 0) return;
+            const target = lineFromBlockClick(event.target as HTMLElement, block, linesRef.current);
+            requestFocus(target, (linesRef.current[target] ?? "").length);
+          }}
+        >
+          {renderMarkdownBlocks(lines.slice(block.start, block.end + 1).join("\n"), renderOptions)}
+        </div>
+      );
+      index = block.end;
+      continue;
+    }
+    rows.push(<EditorLine key={index} {...lineProps(index, lines[index], inActiveBlock(index))} />);
+  }
+
   return (
     <div
-      className={cx(className, classNames?.root)}
+      className={cx("hme-chat-markdown", "hme-editor-root", className, classNames?.root)}
+      data-theme={chatMarkdownProps?.theme ?? "system"}
       style={{ position: "relative", display: "flex", flexDirection: "column", ...styles?.root }}
     >
+      <style data-hme-editor-styles>{chatMarkdownCss(!!chatMarkdownProps?.widgets) + "\n" + editorCss}</style>
       {presentation === "preview" && !readOnly && (
         <button type="button" aria-label="Preview Markdown" onClick={() => setActiveLineIndex(null)} style={{ alignSelf: "flex-end", cursor: "pointer", marginBottom: 12, padding: "6px 12px", borderRadius: 8, border: "1px solid currentColor", background: "transparent", color: "inherit" }}>Preview</button>
       )}
+      {!readOnly && (
+        <span id={hintId} className="hme-sr-only">
+          Press Enter to edit. While editing, press Escape to stop editing.
+        </span>
+      )}
       <div
         ref={contentRef}
-        className={cx(classNames?.content)}
+        className={cx("hme-editor", classNames?.content)}
         style={{ display: "flex", flexDirection: "column", maxWidth: "none", ...styles?.content }}
+        // Keyboard entry: when no line is active the editor itself is focusable; Enter resumes editing.
+        tabIndex={!readOnly && activeLineIndex === null ? 0 : -1}
+        role={readOnly ? undefined : "group"}
+        aria-label={readOnly ? undefined : "Markdown editor"}
+        aria-describedby={readOnly ? undefined : hintId}
+        onKeyDown={(event) => {
+          if (readOnly || activeLineIndex !== null || event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === "F2") {
+            event.preventDefault();
+            const index = Math.min(lastActiveLineRef.current, linesRef.current.length - 1);
+            requestFocus(index, (linesRef.current[index] ?? "").length);
+          }
+        }}
         onClick={(event) => {
           if (readOnly) return;
           if (event.currentTarget === event.target && activeLineIndex !== null) setActiveLineIndex(null);
@@ -984,10 +1219,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
           draggingFromTextareaRef.current = !!textarea;
 
           if (textarea) {
-            selectionAnchorRef.current = {
-              index,
-              displayOffset: mapSourceIndexToDisplayOffset(linesRef.current[index] ?? "", textarea.selectionStart ?? 0),
-            };
+            // Resolved to a display offset once the line renders again (see bridging below).
+            selectionAnchorRef.current = { index, displayOffset: -1, sourceIndex: textarea.selectionStart ?? 0 };
             return;
           }
 
@@ -1017,6 +1250,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
           bridgingSelectionRef.current = true;
           draggingFromTextareaRef.current = false;
           setTimeout(() => {
+            if (anchor.displayOffset < 0) anchor.displayOffset = sourceToDisplay(anchor.index, anchor.sourceIndex ?? 0);
             if (anchor.index <= endIndex) {
               setSelectionFromDisplayPoints(anchor.index, anchor.displayOffset, endIndex, endOffset);
             } else {
@@ -1032,27 +1266,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
           bridgingSelectionRef.current = false;
         }}
       >
-        {lines.map((line, index) => (
-          <EditorLine
-            key={index}
-            index={index}
-            line={line}
-            isActive={activeLineIndex === index}
-            readOnly={readOnly}
-            focusVersion={focusVersion}
-            onUpdate={(event) => handleLineChange(index, event.target.value)}
-            onActivate={(caret) => requestFocus(index, caret)}
-            onKeyDown={(event) => handleKeyDown(event, index)}
-            onPaste={(event) => handlePaste(event, index)}
-            cursorPositionRef={cursorPositionRef}
-            isSelectingRef={isSelectingRef}
-            classNames={classNames}
-            styles={styles}
-            renderLine={renderLine}
-            extensionsPrefix={extensionsWithPrefix}
-            extensionsSuffix={extensionsWithSuffix}
-          />
-        ))}
+        {rows}
       </div>
     </div>
   );

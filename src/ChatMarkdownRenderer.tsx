@@ -427,6 +427,14 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
   return nodes;
 }
 
+// Internal: shared with HybridMarkdownEditor so hybrid lines and blocks render exactly like
+// the renderer. Not exported from the package index.
+export type MarkdownRenderOptions = RenderOptions;
+export const renderMarkdownInline = (text: string, opts: RenderOptions): React.ReactNode[] => inline(text, opts);
+export const renderMarkdownBlocks = (markdown: string, opts: RenderOptions): React.ReactNode[] =>
+  renderBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"), opts);
+export const chatMarkdownCss = (widgets: boolean): string => widgets ? markdownCss + "\n" + widgetCss : markdownCss;
+
 export function ChatMarkdownRenderer({
   markdown,
   className,
@@ -441,7 +449,7 @@ export function ChatMarkdownRenderer({
     [markdown, renderMath, highlightCode, widgets]
   );
   return <div className={["hme-chat-markdown", className].filter(Boolean).join(" ")} style={style} data-theme={theme}>
-    <style data-hme-markdown-styles>{widgets ? markdownCss + "\n" + widgetCss : markdownCss}</style>
+    <style data-hme-markdown-styles>{chatMarkdownCss(widgets)}</style>
     {nodes}
   </div>;
 }
