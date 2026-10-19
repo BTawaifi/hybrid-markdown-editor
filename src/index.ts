@@ -9,3 +9,6 @@ export type {
   ExtensionApi,
   HybridMarkdownEditorProps,
 } from "./HybridMarkdownEditor";
+
+export { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
+export type { ChatMarkdownRendererProps } from "./ChatMarkdownRenderer";
