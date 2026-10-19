@@ -20,12 +20,24 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Skip if this version is already on npm
+        id: published
+        run: |
+          if npm view "$(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")" version > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - run: npm ci --no-audit --no-fund
+        if: steps.published.outputs.skip != 'true'
       - name: Tag matches package.json version
+        if: steps.published.outputs.skip != 'true'
         run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
       - run: npm run typecheck
+        if: steps.published.outputs.skip != 'true'
       - run: npm test
+        if: steps.published.outputs.skip != 'true'
       - run: npm run build
+        if: steps.published.outputs.skip != 'true'
       - run: npm publish --provenance --access public
+        if: steps.published.outputs.skip != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
