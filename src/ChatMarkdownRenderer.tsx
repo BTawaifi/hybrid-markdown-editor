@@ -16,9 +16,14 @@ export type ChatMarkdownRendererProps = {
   theme?: "system" | "light" | "dark";
   renderMath?: (latex: string, display: boolean) => React.ReactNode;
   highlightCode?: (code: string, language: string) => React.ReactNode;
+  /**
+   * Render flow/checklist/roadmap/cards/choice fences as components (see ChatWidgets).
+   * Off by default: that syntax is not standard Markdown, so the fences stay code blocks.
+   */
+  widgets?: boolean;
 };
 
-type RenderOptions = Pick<ChatMarkdownRendererProps, "renderMath" | "highlightCode">;
+type RenderOptions = Pick<ChatMarkdownRendererProps, "renderMath" | "highlightCode" | "widgets">;
 
 // Compact chat typography (16/26px body, 600-weight compact headings,
 // 8px block rhythm, 24px-radius code surfaces with a language header, borderless tables).
@@ -332,7 +337,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
         source.push(lines[i++]);
       }
       if (i < lines.length) i++;
-      const widget = widgetKinds.has(language)
+      const widget = opts.widgets && widgetKinds.has(language)
         ? renderWidget(language, openingFence[2], source.join("\n"), text => inline(text, opts))
         : null;
       add(widget ?? <CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} />);
@@ -429,13 +434,14 @@ export function ChatMarkdownRenderer({
   theme = "system",
   renderMath,
   highlightCode,
+  widgets = false,
 }: ChatMarkdownRendererProps) {
   const nodes = useMemo(
-    () => renderBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"), { renderMath, highlightCode }),
-    [markdown, renderMath, highlightCode]
+    () => renderBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"), { renderMath, highlightCode, widgets }),
+    [markdown, renderMath, highlightCode, widgets]
   );
   return <div className={["hme-chat-markdown", className].filter(Boolean).join(" ")} style={style} data-theme={theme}>
-    <style data-hme-markdown-styles>{markdownCss + "\n" + widgetCss}</style>
+    <style data-hme-markdown-styles>{widgets ? markdownCss + "\n" + widgetCss : markdownCss}</style>
     {nodes}
   </div>;
 }

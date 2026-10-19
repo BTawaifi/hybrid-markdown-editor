@@ -1,7 +1,8 @@
 import React, { useId, useState } from "react";
 
 /**
- * Widget fences: small line-based blocks that render as chat-style components.
+ * Widget fences (opt-in via the renderer's `widgets` prop): small line-based blocks that
+ * render as chat-style components.
  *
  *   ```flow [vertical|horizontal]    one step per line:  Label | detail
  *   ```checklist                     - [ ] item / - [x] item
