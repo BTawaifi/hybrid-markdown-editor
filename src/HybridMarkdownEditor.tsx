@@ -7,6 +7,7 @@ import {
   chatMarkdownCss,
   renderMarkdownBlocks,
   renderMarkdownInline,
+  type BuiltInIntegrations,
   type ChatMarkdownRendererProps,
   type MarkdownRenderOptions,
 } from "./ChatMarkdownRenderer";
@@ -689,7 +690,7 @@ const BlockView = React.memo(function BlockView({ start, end, markdown, readOnly
   );
 });
 
-export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
+export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps & { builtIns?: BuiltInIntegrations }> = ({
   value,
   onDebouncedChange,
   onChange,
@@ -703,6 +704,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   renderLine,
   options,
   extensions,
+  builtIns,
 }) => {
   const initialLines = (value || "").split("\n");
   const [lines, setLines] = useState<string[]>(initialLines);
@@ -850,8 +852,8 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
   const highlightCode = chatMarkdownProps?.highlightCode;
   const widgets = chatMarkdownProps?.widgets;
   const renderOptions = useMemo<MarkdownRenderOptions>(
-    () => ({ renderMath, highlightCode, widgets }),
-    [renderMath, highlightCode, widgets]
+    () => ({ renderMath, highlightCode, widgets, builtIns }),
+    [renderMath, highlightCode, widgets, builtIns]
   );
 
   // Display <-> source mapping against the rendered DOM of a line (matches what the user sees).
@@ -1305,6 +1307,7 @@ export const HybridMarkdownEditor: React.FC<HybridMarkdownEditorProps> = ({
         {!readOnly && <button type="button" aria-label="Edit Markdown" onClick={() => requestFocus(0, 0)} style={{ float: "right", cursor: "pointer", marginBottom: 12, padding: "6px 12px", borderRadius: 8, border: "1px solid currentColor", background: "transparent", color: "inherit" }}>Edit</button>}
         <ChatMarkdownRenderer
           {...chatMarkdownProps}
+          builtIns={builtIns}
           markdown={lines.join("\n")}
           onTaskToggle={(line, checked) => {
             if (readOnly) return; // controlled by the source, so read-only checkboxes stay put

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { codeLanguageLabel, detectCodeLanguage, renderBuiltInHighlight, renderBuiltInMath } from "./MarkdownIntegrations";
+import { codeLanguageLabel } from "./codeLabels";
 import { ToggleBox, renderWidget, widgetCss, widgetKinds } from "./ChatWidgets";
 
 /**
@@ -29,8 +29,25 @@ export type ChatMarkdownRendererProps = {
   onTaskToggle?: (line: number, checked: boolean) => void;
 };
 
+/**
+ * Math typesetting, code colouring and language detection. The main entry supplies KaTeX and
+ * highlight.js; the lite entry leaves them out (math shows as source, code as plain text).
+ */
+export type BuiltInIntegrations = {
+  renderMath: (latex: string, display: boolean) => React.ReactNode;
+  highlightCode: (code: string, language: string) => React.ReactNode;
+  detectLanguage: (code: string) => string;
+};
+
 /** `lineBase`: index of `lines[0]` in the original markdown (nested quotes, fences). */
-type RenderOptions = Pick<ChatMarkdownRendererProps, "renderMath" | "highlightCode" | "widgets" | "onTaskToggle"> & { lineBase?: number };
+type RenderOptions = Pick<ChatMarkdownRendererProps, "renderMath" | "highlightCode" | "widgets" | "onTaskToggle"> & {
+  lineBase?: number;
+  builtIns?: BuiltInIntegrations;
+};
+
+const sourceMath = (latex: string, display: boolean): React.ReactNode =>
+  <span className={display ? "hme-math-fallback hme-math-display" : "hme-math-fallback"}>{latex}</span>;
+const mathFor = (opts: RenderOptions) => opts.renderMath ?? opts.builtIns?.renderMath ?? sourceMath;
 
 // Compact chat typography (16/26px body, 600-weight compact headings,
 // 8px block rhythm, 24px-radius code surfaces with a language header, borderless tables).
@@ -112,7 +129,7 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
       const close = source.indexOf("\\)", i + 2);
       if (close > i + 2) {
         const latex = source.slice(i + 2, close);
-        emit(opts.renderMath ? opts.renderMath(latex, false) : renderBuiltInMath(latex, false));
+        emit(mathFor(opts)(latex, false));
         i = close + 2;
         continue;
       }
@@ -186,7 +203,7 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
       const end = source.indexOf("$", i + 1);
       if (end > i + 1 && source[end - 1] !== "\\") {
         const math = source.slice(i + 1, end);
-        emit(opts.renderMath ? opts.renderMath(math, false) : renderBuiltInMath(math, false));
+        emit(mathFor(opts)(math, false));
         i = end + 1;
         continue;
       }
@@ -255,8 +272,8 @@ function tableAlign(row: string): Array<"left" | "center" | "right" | undefined>
   return columns.map(c => c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : c.startsWith(":") ? "left" : undefined);
 }
 
-function CodePanel({ code, language, highlightCode }: {
-  code: string; language: string; highlightCode?: RenderOptions["highlightCode"];
+function CodePanel({ code, language, highlightCode, builtIns }: {
+  code: string; language: string; highlightCode?: RenderOptions["highlightCode"]; builtIns?: BuiltInIntegrations;
 }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -269,14 +286,14 @@ function CodePanel({ code, language, highlightCode }: {
     }
   };
   // Unlabeled blocks (indented code, bare fences) get a detected language, as chat UIs do.
-  const lang = useMemo(() => language || detectCodeLanguage(code), [code, language]);
+  const lang = useMemo(() => language || builtIns?.detectLanguage(code) || "", [code, language, builtIns]);
   return <div className="hme-code-block">
     <div className="hme-code-header">
       <svg className="hme-code-icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M7 6 3 10l4 4M13 6l4 4-4 4" /></svg>
       <span className="hme-language">{codeLanguageLabel(lang)}</span>
       <button className="hme-code-copy" type="button" onClick={copy} aria-label="Copy code">{copied ? "Copied" : "Copy code"}</button>
     </div>
-    <pre><code>{highlightCode ? highlightCode(code, lang) : renderBuiltInHighlight(code, lang)}</code></pre>
+    <pre><code>{highlightCode ? highlightCode(code, lang) : builtIns ? builtIns.highlightCode(code, lang) : code}</code></pre>
   </div>;
 }
 
@@ -369,7 +386,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
         ? renderWidget(language, openingFence[2], source.join("\n"), text => inline(text, opts),
           opts.onTaskToggle && ((line, checked) => opts.onTaskToggle!(contentLine + line, checked)))
         : null;
-      add(widget ?? <CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} />);
+      add(widget ?? <CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} builtIns={opts.builtIns} />);
       continue;
     }
     const mathStart = current.trim().startsWith("$$") ? "$$" : current.trim().startsWith("\\[") ? "\\[" : null;
@@ -391,7 +408,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
         latex = parts.join("\n");
       }
       const content = latex.trim();
-      add(<div className="hme-math-block">{opts.renderMath ? opts.renderMath(content, true) : renderBuiltInMath(content, true)}</div>);
+      add(<div className="hme-math-block">{mathFor(opts)(content, true)}</div>);
       continue;
     }
     const head = current.match(heading);
@@ -448,7 +465,7 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
         source.push(lines[i++].replace(/^(?: {4}|\t)/, ""));
       }
       while (source.length && !source[source.length - 1].trim()) source.pop();
-      add(<CodePanel code={source.join("\n")} language="" highlightCode={opts.highlightCode} />);
+      add(<CodePanel code={source.join("\n")} language="" highlightCode={opts.highlightCode} builtIns={opts.builtIns} />);
       continue;
     }
     const paragraph = [current.trim()];
@@ -483,10 +500,11 @@ export function ChatMarkdownRenderer({
   highlightCode,
   widgets = false,
   onTaskToggle,
-}: ChatMarkdownRendererProps) {
+  builtIns,
+}: ChatMarkdownRendererProps & { builtIns?: BuiltInIntegrations }) {
   const nodes = useMemo(
-    () => renderBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"), { renderMath, highlightCode, widgets, onTaskToggle }),
-    [markdown, renderMath, highlightCode, widgets, onTaskToggle]
+    () => renderBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"), { renderMath, highlightCode, widgets, onTaskToggle, builtIns }),
+    [markdown, renderMath, highlightCode, widgets, onTaskToggle, builtIns]
   );
   return <div className={["hme-chat-markdown", className].filter(Boolean).join(" ")} style={style} data-theme={theme}>
     <style data-hme-markdown-styles>{chatMarkdownCss(widgets)}</style>

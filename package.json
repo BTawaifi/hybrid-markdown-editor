@@ -1,7 +1,7 @@
 {
   "name": "hybrid-markdown-editor",
-  "version": "1.0.0",
-  "description": "Obsidian-like hybrid markdown editor (per-line renderer + inline editing) for React.",
+  "version": "2.0.0",
+  "description": "Obsidian-style hybrid Markdown editor and safe chat-style Markdown renderer for React, with math, code highlighting, tables and optional widgets.",
   "license": "MIT",
   "author": "Boutros Tawaifi",
   "repository": {
@@ -13,14 +13,33 @@
     "editor",
     "react",
     "obsidian",
-    "hybrid"
+    "hybrid",
+    "wysiwyg",
+    "renderer",
+    "katex",
+    "highlight.js",
+    "chat"
   ],
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./lite": {
+      "types": "./dist/lite.d.ts",
+      "import": "./dist/lite.mjs",
+      "require": "./dist/lite.js"
+    },
+    "./package.json": "./package.json"
+  },
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "test": "vitest run",
@@ -32,8 +51,7 @@
   },
   "peerDependencies": {
     "react": ">=18",
-    "react-dom": ">=18",
-    "react-textarea-autosize": ">=8"
+    "react-dom": ">=18"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.3",
@@ -42,7 +60,6 @@
     "jsdom": "^30.1.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-textarea-autosize": "^8.5.9",
     "rimraf": "^6.1.3",
     "tsup": "^9.0.0",
     "typescript": "^7.0.2",
@@ -50,6 +67,11 @@
   },
   "dependencies": {
     "highlight.js": "^11.12.0",
-    "katex": "^0.19.0"
+    "katex": "^0.19.0",
+    "react-textarea-autosize": "^8.5.9"
+  },
+  "homepage": "https://github.com/BTawaifi/hybrid-markdown-editor#readme",
+  "bugs": {
+    "url": "https://github.com/BTawaifi/hybrid-markdown-editor/issues"
   }
 }

@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { alignDisplayToSource, findMarkdownBlocks, HybridMarkdownEditor } from "./HybridMarkdownEditor";
-import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
+import { alignDisplayToSource, findMarkdownBlocks } from "./HybridMarkdownEditor";
+import { HybridMarkdownEditor } from "./index";
+import { ChatMarkdownRenderer } from "./index";
 
 const fence = "```";
 

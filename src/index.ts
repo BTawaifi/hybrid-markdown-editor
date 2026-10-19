@@ -1,14 +1,10 @@
-export {
-  default as HybridMarkdownEditor,
-  parseBold,
-  mapDisplayOffsetToSourceIndex,
-} from "./HybridMarkdownEditor";
+// Main entry: components with built-in KaTeX math and highlight.js code colouring.
+export { HybridMarkdownEditor, ChatMarkdownRenderer } from "./full";
+export { parseBold, mapDisplayOffsetToSourceIndex } from "./HybridMarkdownEditor";
 
 export type {
   EditorExtension,
   ExtensionApi,
   HybridMarkdownEditorProps,
 } from "./HybridMarkdownEditor";
-
-export { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
 export type { ChatMarkdownRendererProps } from "./ChatMarkdownRenderer";
