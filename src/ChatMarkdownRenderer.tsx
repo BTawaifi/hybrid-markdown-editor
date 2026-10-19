@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { codeLanguageLabel, detectCodeLanguage, renderBuiltInHighlight, renderBuiltInMath } from "./MarkdownIntegrations";
+import { renderWidget, widgetCss, widgetKinds } from "./ChatWidgets";
 
 /**
  * A safe React renderer for chat-style Markdown with built-in math and syntax highlighting.
@@ -331,7 +332,10 @@ function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.Re
         source.push(lines[i++]);
       }
       if (i < lines.length) i++;
-      add(<CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} />);
+      const widget = widgetKinds.has(language)
+        ? renderWidget(language, openingFence[2], source.join("\n"), text => inline(text, opts))
+        : null;
+      add(widget ?? <CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} />);
       continue;
     }
     const mathStart = current.trim().startsWith("$$") ? "$$" : current.trim().startsWith("\\[") ? "\\[" : null;
@@ -431,7 +435,7 @@ export function ChatMarkdownRenderer({
     [markdown, renderMath, highlightCode]
   );
   return <div className={["hme-chat-markdown", className].filter(Boolean).join(" ")} style={style} data-theme={theme}>
-    <style data-hme-markdown-styles>{markdownCss}</style>
+    <style data-hme-markdown-styles>{markdownCss + "\n" + widgetCss}</style>
     {nodes}
   </div>;
 }
