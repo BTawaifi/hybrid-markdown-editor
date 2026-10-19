@@ -221,7 +221,7 @@ const buildVisibleSourceIndices = (line: string): { indices: number[]; end: numb
 export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: number): number => {
   const { indices, end } = buildVisibleSourceIndices(line);
   if (indices.length === 0) return end;
-  const offset = Math.max(0, Math.floor(displayOffset));
+  const offset = Number.isFinite(displayOffset) ? Math.max(0, Math.floor(displayOffset)) : 0;
   if (offset >= indices.length) return end;
   return indices[offset];
 };
@@ -229,7 +229,7 @@ export const mapDisplayOffsetToSourceIndex = (line: string, displayOffset: numbe
 const mapSourceIndexToDisplayOffset = (line: string, sourceIndex: number): number => {
   const { indices } = buildVisibleSourceIndices(line);
   if (indices.length === 0) return 0;
-  const target = Math.max(0, sourceIndex);
+  const target = Number.isFinite(sourceIndex) ? Math.max(0, sourceIndex) : 0;
   const found = indices.findIndex((index) => index >= target);
   return found === -1 ? indices.length : found;
 };
