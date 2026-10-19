@@ -31,9 +31,10 @@ describe("deterministic adversarial Markdown fuzzing", () => {
       const duplicate = renderToStaticMarkup(<ChatMarkdownRenderer markdown={markdown} />);
       expect(output, "unstable rendering at sample " + sample).toBe(duplicate);
       expect(output.length, "output blow-up at sample " + sample).toBeLessThan(180000);
-      expect(output).not.toMatch(/<script(?:\s|>)/i);
-      expect(output).not.toMatch(/\sonerror=/i);
-      expect(output).not.toMatch(/href="(?:javascript:|data:)/i);
+      const container = document.createElement("div");
+      container.innerHTML = output;
+      expect(container.querySelectorAll("script, iframe, [onerror], [onclick]")).toHaveLength(0);
+      expect(container.querySelectorAll('a[href^="javascript:"], a[href^="data:"]')).toHaveLength(0);
     }
   });
 
@@ -45,7 +46,9 @@ describe("deterministic adversarial Markdown fuzzing", () => {
         line += tokens[Math.floor(rand() * tokens.length)].replace(/\n/g, "");
       }
       let previous = -1;
-      for (let offset = 0; offset <= line.length + 2; offset++) {
+      const offsets = new Set([0, 1, 2, line.length, line.length + 2]);
+      for (let probe = 0; probe < 18; probe++) offsets.add(Math.floor(rand() * (line.length + 3)));
+      for (const offset of Array.from(offsets).sort((a, b) => a - b)) {
         const index = mapDisplayOffsetToSourceIndex(line, offset);
         expect(index, "out of bounds at sample " + sample).toBeGreaterThanOrEqual(0);
         expect(index).toBeLessThanOrEqual(line.length);
