@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ChatMarkdownRenderer } from "./ChatMarkdownRenderer";
-import { mapDisplayOffsetToSourceIndex } from "./HybridMarkdownEditor";
+import { HybridMarkdownEditor, mapDisplayOffsetToSourceIndex } from "./HybridMarkdownEditor";
 
 // Fixed-seed fuzz cases are deterministic in CI and reproducible locally.
 function generator(seed: number) {
@@ -55,6 +56,36 @@ describe("deterministic adversarial Markdown fuzzing", () => {
         expect(index, "mapping reversal at sample " + sample).toBeGreaterThanOrEqual(previous);
         previous = index;
       }
+    }
+  });
+
+  it("preserves the controlled change contract across 60 seeded edit operations", () => {
+    const rand = generator(0xba11cafe);
+    for (let sample = 0; sample < 60; sample++) {
+      const left = "left" + Math.floor(rand() * 1000000);
+      const right = "right" + Math.floor(rand() * 1000000);
+      const split = sample % 2 === 0;
+      const value = split ? left + right : left + "\n" + right;
+      const caret = Math.floor(rand() * (left.length + 1));
+      let observed: string | undefined;
+      function Harness() {
+        const [markdown, setMarkdown] = useState(value);
+        return <HybridMarkdownEditor value={markdown} onChange={(next) => { observed = next; setMarkdown(next); }} />;
+      }
+      const view = render(<Harness />);
+      const label = split ? left + right : right;
+      fireEvent.mouseUp(screen.getByText(label));
+      const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+      const offset = split ? caret : 0;
+      input.setSelectionRange(offset, offset);
+      fireEvent.select(input);
+      fireEvent.keyDown(input, { key: split ? "Enter" : "Backspace" });
+      const expected = split
+        ? value.slice(0, offset) + "\n" + value.slice(offset)
+        : left + right;
+      expect(observed, "edit mismatch in seeded case " + sample).toBe(expected);
+      view.unmount();
+      cleanup();
     }
   });
 
