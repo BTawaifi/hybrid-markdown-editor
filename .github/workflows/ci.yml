@@ -43,6 +43,14 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Smoke-test runtime exports and declaration files
+        run: |
+          node -e "const x = require('./dist/index.js'); if (typeof x.ChatMarkdownRenderer !== 'function' || typeof x.HybridMarkdownEditor !== 'function') process.exit(1)"
+          node --input-type=module -e "import {ChatMarkdownRenderer, HybridMarkdownEditor} from './dist/index.mjs'; if (typeof ChatMarkdownRenderer !== 'function' || typeof HybridMarkdownEditor !== 'function') process.exit(1)"
+          test -s dist/index.d.ts
+          test -s dist/ChatMarkdownRenderer.d.ts
+          test -s dist/HybridMarkdownEditor.d.ts
+
       - name: Verify package contents
         run: npm pack --dry-run
 
