@@ -33,9 +33,39 @@ describe("ChatMarkdownRenderer", () => {
   it("renders fenced code with language and copy control", () => {
     const markdown = "&#96;&#96;&#96;typescript\nconst n = 42;\n&#96;&#96;&#96;".split("&#96;").join(String.fromCharCode(96));
     const { container } = render(<ChatMarkdownRenderer markdown={markdown} />);
-    expect(container.querySelector(".hme-language")?.textContent).toBe("typescript");
+    expect(container.querySelector(".hme-language")?.textContent).toBe("TypeScript");
     expect(container.querySelector("pre code")?.textContent).toBe("const n = 42;");
     expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy();
+  });
+
+  it("renders setext headings, including over a thematic-break-like underline", () => {
+    const { container } = render(<ChatMarkdownRenderer markdown={"Big Title\n=========\n\nPart\n----\n\ntext\n\n---"} />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Big Title");
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Part");
+    expect(container.querySelectorAll("hr").length).toBe(1);
+  });
+
+  it("keeps loose lists (blank lines between items) as one list", () => {
+    const { container } = render(<ChatMarkdownRenderer markdown={"1. one\n\n2. two\n\n   more of two\n\n3. three\n\n- a\n\n- b"} />);
+    expect(container.querySelectorAll("ol").length).toBe(1);
+    expect(container.querySelectorAll("ol > li").length).toBe(3);
+    expect(container.querySelectorAll("ol > li")[1].textContent).toBe("two more of two");
+    expect(container.querySelectorAll("ul > li").length).toBe(2);
+  });
+
+  it("renders indented code blocks with a detected language label", () => {
+    const code = "    export default async function Page() {\n      const tasks = await getTasks();\n      return tasks.map((t: Task) => t.title);\n    }";
+    const { container } = render(<ChatMarkdownRenderer markdown={"Intro:\n\n" + code + "\n\nAfter\n    lazy continuation"} />);
+    expect(container.querySelector("pre code")?.textContent).toContain("export default async function Page() {\n  const tasks");
+    expect(container.querySelector(".hme-language")?.textContent).not.toBe("Plain text");
+    expect(container.querySelectorAll("pre").length).toBe(1);
+    expect(container.querySelector("p:last-of-type")?.textContent).toBe("After lazy continuation");
+  });
+
+  it("renders images with empty alt text but not label-less links", () => {
+    const { container } = render(<ChatMarkdownRenderer markdown={"![](/icon.png) [](https://example.com)"} />);
+    expect(container.querySelector("img")?.getAttribute("alt")).toBe("");
+    expect(container.querySelector("a")).toBeNull();
   });
 
   it("renders blockquotes and horizontal rules", () => {

@@ -43,6 +43,42 @@ const aliases: Record<string, keyof typeof grammars> = {
   golang: "go",
 };
 
+const displayNames: Record<string, string> = {
+  bash: "Bash", css: "CSS", diff: "Diff", go: "Go", javascript: "JavaScript", json: "JSON",
+  markdown: "Markdown", python: "Python", rust: "Rust", sql: "SQL", typescript: "TypeScript",
+  xml: "HTML", yaml: "YAML", jsx: "JSX", tsx: "TSX", html: "HTML", svg: "SVG", sh: "Shell",
+};
+
+/** Human-readable language name for a code block header, as chat UIs show it. */
+export function codeLanguageLabel(language: string): string {
+  const key = language.toLowerCase();
+  if (!key || key === "text" || key === "plaintext") return "Plain text";
+  return displayNames[key] ?? displayNames[aliases[key] ?? ""] ?? language;
+}
+
+/**
+ * Guess the language of an unlabeled code block among the registered grammars.
+ * Returns "" when the guess is weak, so prose-like blocks stay plain text.
+ */
+export function detectCodeLanguage(code: string): string {
+  const source = code.trimStart();
+  if (!source || code.length > 20000) return "";
+  // Short shell commands and SQL statements score too low for auto-detection.
+  if (/^(?:\$ )?(?:npm|npx|pnpm|yarn|bun|cd|git|docker|curl|wget|psql|mkdir|brew|sudo|apt|pip)\s/.test(source)) return "bash";
+  if (/^(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s/.test(source)) return "sql";
+  try {
+    const guess = hljs.highlightAuto(code, Object.keys(grammars));
+    if (guess.relevance < 5 || !guess.language) return "";
+    // TypeScript is a superset of JavaScript and untyped TS/TSX scores slightly below the JS
+    // grammar (0.86-1.0 of it on a 55-block sample), so JS-family code is labeled
+    // TypeScript, matching chat UIs. Deliberate bias: plain JavaScript gets the TS label too.
+    if (guess.language === "javascript" && hljs.highlight(code, { language: "typescript", ignoreIllegals: true }).relevance >= guess.relevance * 0.85) return "typescript";
+    return guess.language;
+  } catch {
+    return "";
+  }
+}
+
 /**
  * KaTeX's native MathML output does not need a separate stylesheet or
  * downloadable webfonts. KaTeX generates the markup with trust disabled,
