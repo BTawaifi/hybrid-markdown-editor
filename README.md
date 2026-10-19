@@ -6,63 +6,36 @@ A lightweight, Obsidian-style Markdown editor for React. Inactive lines render a
 npm i hybrid-markdown-editor
 ```
 
-## Chat-style full-document Markdown rendering
+## Rich full-document Markdown rendering
 
-The original per-line hybrid editing behavior remains the default. For a rich, ChatGPT-inspired reading experience, use the new full-document renderer or opt into the editor's document preview.
+The package includes a ChatGPT-inspired document renderer with built-in syntax coloring and mathematical typesetting, in addition to the source-aware hybrid editor. No extra installation or renderer callbacks are required.
 
-The renderer supports headings, paragraphs, emphasis, strikethrough, inline code, links, images, nested unordered/ordered lists, task lists, blockquotes, rules, GFM-style tables, fenced code blocks with copy controls, responsive table scrolling, and light/dark/system typography. It uses React elements instead of untrusted HTML injection, and disallows unsafe URL schemes.
+- **Math:** KaTeX typesets inline `$x^2$` / `\(x^2\)` and display `$$...$$` / `\[...\]` expressions into native MathML. This avoids separate stylesheets and font downloads, but appearance depends on the browser's MathML support.
+- **Code:** highlight.js colors fenced code for JavaScript/JSX, TypeScript/TSX, Python, Bash, JSON, CSS, XML/HTML, SQL, Go, Rust, YAML, Diff, and Markdown. Unknown languages remain readable plain text, and the copy button continues to work.
+- **Markdown:** headings, emphasis, strikethrough, inline code, links, images, nested lists, task checkboxes, blockquotes, horizontal rules, and scrollable GFM-style tables.
+- **Appearance:** automatic light/dark/system typography and token colors.
 
-### Standalone, read-only display
+### Read-only renderer
 
 ~~~tsx
 import { ChatMarkdownRenderer } from "hybrid-markdown-editor";
 
-<ChatMarkdownRenderer
-  markdown={"# Example\n\n| Feature | Status |\n| --- | --- |\n| Tables | Done |"}
-  theme="system" // "system" | "light" | "dark"
-/>
+const markdown = [
+  "# Calculations",
+  "",
+  "Euler's identity: $e^{i\\pi}+1=0$",
+  "",
+  "~~~ts",
+  "const result: number = 42;",
+  "~~~",
+].join("\n");
+
+<ChatMarkdownRenderer markdown={markdown} theme="system" />;
 ~~~
 
-### Rich preview with inline editing
+Rich rendering is enabled by default. Advanced callers can still supply `renderMath(latex, display)` or `highlightCode(code, language)` overrides.
 
-~~~tsx
-import { useState } from "react";
-import { HybridMarkdownEditor } from "hybrid-markdown-editor";
-
-function Example() {
-  const [value, setValue] = useState("# Heading\n\nSome **bold** text.");
-
-  return (
-    <HybridMarkdownEditor
-      value={value}
-      onChange={setValue}
-      presentation="chatgpt"
-    />
-  );
-}
-~~~
-
-When `presentation="chatgpt"` is selected, the editor initially displays a full-document preview. Click **Edit** to enter the existing per-line source editor, or **Preview** to return to the rich preview. `readOnly` displays the full document with no edit button. The original default (`presentation="hybrid"`) retains the tested source-aware caret mapping, selection deletion, and other inline editing behaviors.
-
-For mathematical typesetting and colored syntax tokens, inject the renderer provided by your host application:
-
-~~~tsx
-<ChatMarkdownRenderer
-  markdown={value}
-  renderMath={(latex, display) =>
-    /* Pass LaTeX to your installed math renderer; return React nodes */
-    <span data-display={display}>{latex}</span>
-  }
-  highlightCode={(code, language) =>
-    /* Pass code to your syntax highlighter; return React nodes */
-    <code data-language={language}>{code}</code>
-  }
-/>
-~~~
-
-Without those optional hooks, math falls back to readable source notation and code blocks remain unhighlighted but retain their language label, formatting, and copy button.
-
-**Scope:** this is a ChatGPT-inspired CommonMark/GFM subset, not a copy of ChatGPT's private renderer. Raw HTML is shown as text rather than interpreted; advanced Markdown extensions, full TeX typesetting, and syntax coloring require dedicated integration. Large documents, highly complex nested blocks, and arbitrary edge cases may need an established Markdown AST parser. The chat-style preview is intentionally document-level rather than source-position-preserving; the standard hybrid mode is still the correct choice for per-line interactive selection and editing.
+**Security:** raw HTML is escaped rather than executed, code highlighting escapes source tokens, unknown code languages render as React text, and KaTeX operates with `trust: false`. This is not an exact copy of ChatGPT's private renderer or a complete CommonMark parser. Native MathML requires browser support; advanced nested block edge cases may need a standards-compliant Markdown AST.
 
 ## Core contract
 
