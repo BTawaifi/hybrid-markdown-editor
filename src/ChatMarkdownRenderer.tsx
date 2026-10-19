@@ -59,7 +59,7 @@ const markdownCss = [
 
 const safeUrl = (raw: string): string | null => {
   const value = raw.trim();
-  if (!value || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  if (!value || /[\u0000-\u0020\u007f\\]/.test(value)) return null;
   if (/^(?:https?:\/\/|mailto:)/i.test(value)) return value;
   // No scheme means a relative URL. Network-path URLs are excluded.
   if (value.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(value)) return null;
@@ -74,7 +74,8 @@ const imageUrl = (raw: string): string | null => {
 
 /** Small inline Markdown parser; React escapes all ordinary text automatically. */
 function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode[] {
-  if (depth > 8) return [source];
+  // Avoid superlinear delimiter scans on hostile, unbroken paragraphs.
+  if (depth > 8 || source.length > 16000) return [source];
   const out: React.ReactNode[] = [];
   let plain = "";
   let i = 0;
@@ -152,7 +153,7 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
         }
       }
     }
-    if (c === "$" && source[i + 1] !== "$") {
+    if (c === "$" && source[i + 1] !== "$" && source[i + 1] !== " " && !/[0-9]/.test(source[i + 1] ?? "")) {
       const end = source.indexOf("$", i + 1);
       if (end > i + 1 && source[end - 1] !== "\\") {
         const math = source.slice(i + 1, end);
@@ -187,7 +188,7 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
 }
 
 const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
-const listItem = /^(\s*)([-+*]|\d+[.)])\s+(.+)$/;
+const listItem = /^(\s*)([-+*]|\d+[.)])\s+(.*)$/;
 const quote = /^\s{0,3}>\s?/;
 const fence = /^\s{0,3}(\x60{3,}|~{3,})(.*)$/;
 const horizontalRule = /^\s{0,3}(?:\*\s*){3,}$|^\s{0,3}(?:-\s*){3,}$|^\s{0,3}(?:_\s*){3,}$/;
@@ -238,7 +239,7 @@ function CodePanel({ code, language, highlightCode }: {
   </div>;
 }
 
-function renderList(lines: string[], start: number, opts: RenderOptions): { element: React.ReactNode; next: number } {
+function renderList(lines: string[], start: number, opts: RenderOptions, depth = 0): { element: React.ReactNode; next: number } {
   const first = lines[start].match(listItem)!;
   const baseIndent = first[1].replace(/\t/g, "    ").length;
   const ordered = /^\d/.test(first[2]);
@@ -266,9 +267,15 @@ function renderList(lines: string[], start: number, opts: RenderOptions): { elem
       }
       const nestedIndent = next[1].replace(/\t/g, "    ").length;
       if (nestedIndent <= baseIndent) break;
-      const result = renderList(lines, i, opts);
-      nested.push(<React.Fragment key={i}>{result.element}</React.Fragment>);
-      i = result.next;
+      if (depth >= 24) {
+        // Preserve the source without recursively allocating unbounded React trees.
+        nested.push(<span key={i}>{lines[i].trim()}</span>);
+        i++;
+      } else {
+        const result = renderList(lines, i, opts, depth + 1);
+        nested.push(<React.Fragment key={i}>{result.element}</React.Fragment>);
+        i = result.next;
+      }
     }
     items.push(<li key={items.length} className={task ? "hme-task" : undefined}>
       {task && <input type="checkbox" className="hme-checkbox" aria-label="Task completed" checked={task[1].toLowerCase() === "x"} readOnly />}
@@ -276,17 +283,17 @@ function renderList(lines: string[], start: number, opts: RenderOptions): { elem
     </li>);
   }
   const element = ordered
-    ? <ol start={parseInt(first[2], 10)}>{items}</ol>
+    ? <ol start={Number.isSafeInteger(Number.parseInt(first[2], 10)) ? Number.parseInt(first[2], 10) : 1}>{items}</ol>
     : <ul>{items}</ul>;
   return { element, next: i };
 }
 
-function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
+function renderBlocks(lines: string[], opts: RenderOptions, depth = 0): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let i = 0;
   const add = (node: React.ReactNode) => nodes.push(<React.Fragment key={nodes.length}>{node}</React.Fragment>);
   const special = (text: string): boolean =>
-    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith("$") || text.trim().startsWith("\\\\["));
+    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith("$") || text.trim().startsWith("\\["));
   while (i < lines.length) {
     const current = lines[i];
     if (!current.trim()) { i++; continue; }
@@ -296,7 +303,8 @@ function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
       const language = openingFence[2].trim().split(/\s+/)[0].replace(/[^\w+#.-]/g, "");
       const source: string[] = [];
       i++;
-      while (i < lines.length && !new RegExp("^\\s{0,3}" + (marker[0] === "\x60" ? "\\x60" : "~") + "{" + marker.length + ",}\\s*$").test(lines[i])) {
+      const closeFence = new RegExp("^\\\\s{0,3}" + (marker[0] === "\\x60" ? "\\\\x60" : "~") + "{" + marker.length + ",}\\\\s*$");
+      while (i < lines.length && !closeFence.test(lines[i])) {
         source.push(lines[i++]);
       }
       if (i < lines.length) i++;
@@ -305,7 +313,7 @@ function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
     }
     const mathStart = current.trim().startsWith("$$") ? "$$" : current.trim().startsWith("\\[") ? "\\[" : null;
     if (mathStart) {
-      const mathEnd = mathStart === "$$" ? "$" : "\\]";
+      const mathEnd = mathStart === "$" ? "$" : "\\]";
       let latex = current.trim().slice(mathStart.length);
       const closeOnOpeningLine = latex.indexOf(mathEnd);
       if (closeOnOpeningLine >= 0) {
@@ -339,7 +347,7 @@ function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
       while (i < lines.length && quote.test(lines[i])) {
         quoted.push(lines[i++].replace(quote, ""));
       }
-      add(<blockquote>{renderBlocks(quoted, opts)}</blockquote>);
+      add(<blockquote>{depth >= 24 ? <p>{quoted.join(" ")}</p> : renderBlocks(quoted, opts, depth + 1)}</blockquote>);
       continue;
     }
     if (listItem.test(current)) {
