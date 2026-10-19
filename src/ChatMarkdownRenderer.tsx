@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { renderBuiltInHighlight, renderBuiltInMath } from "./MarkdownIntegrations";
 
 /**
- * A dependency-free, safe React renderer for chat-style Markdown.
+ * A safe React renderer for chat-style Markdown with built-in math and syntax highlighting.
  * It intentionally does not interpret raw HTML or execute embedded content.
  * Rendering is separate from the editor's source-to-caret mapping.
  */
@@ -43,6 +44,17 @@ const markdownCss = [
   ".hme-chat-markdown img{max-width:100%;height:auto;border-radius:8px}.hme-chat-markdown .hme-math-inline{font-family:Georgia,serif;font-style:italic}",
   ".hme-chat-markdown .hme-math-block{display:block;text-align:center;overflow-x:auto;margin:1.3em 0;font-family:Georgia,serif;white-space:pre}",
   ".hme-chat-markdown .hme-language{font-family:ui-monospace,monospace;text-transform:lowercase}",
+  ".hme-chat-markdown .hme-math-typeset{display:inline-block;max-width:100%;overflow-x:auto;vertical-align:middle}.hme-chat-markdown .hme-math-display{display:block;text-align:center}.hme-chat-markdown .hme-math-typeset math{font-size:1.1em}.hme-chat-markdown .hme-math-fallback{color:var(--hme-muted)}",
+  ".hme-chat-markdown{--hme-syntax-keyword:#a626a4;--hme-syntax-string:#4c7c1e;--hme-syntax-number:#986801;--hme-syntax-comment:#7f848e;--hme-syntax-title:#146fb4;--hme-syntax-symbol:#b06a12;--hme-syntax-attr:#b06a12}",
+  ".hme-chat-markdown[data-theme='dark']{--hme-syntax-keyword:#c792ea;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#ffcb6b;--hme-syntax-attr:#ffcb6b}",
+  "@media(prefers-color-scheme:dark){.hme-chat-markdown[data-theme='system']{--hme-syntax-keyword:#c792ea;--hme-syntax-string:#c3e88d;--hme-syntax-number:#f78c6c;--hme-syntax-comment:#8b949e;--hme-syntax-title:#82aaff;--hme-syntax-symbol:#ffcb6b;--hme-syntax-attr:#ffcb6b}}",
+  ".hme-chat-markdown .hljs-keyword,.hme-chat-markdown .hljs-selector-tag,.hme-chat-markdown .hljs-literal,.hme-chat-markdown .hljs-built_in{color:var(--hme-syntax-keyword)}",
+  ".hme-chat-markdown .hljs-string,.hme-chat-markdown .hljs-regexp,.hme-chat-markdown .hljs-addition{color:var(--hme-syntax-string)}",
+  ".hme-chat-markdown .hljs-number,.hme-chat-markdown .hljs-meta{color:var(--hme-syntax-number)}",
+  ".hme-chat-markdown .hljs-comment,.hme-chat-markdown .hljs-quote{color:var(--hme-syntax-comment);font-style:italic}",
+  ".hme-chat-markdown .hljs-title,.hme-chat-markdown .hljs-section,.hme-chat-markdown .hljs-function{color:var(--hme-syntax-title)}",
+  ".hme-chat-markdown .hljs-variable,.hme-chat-markdown .hljs-symbol,.hme-chat-markdown .hljs-deletion{color:var(--hme-syntax-symbol)}",
+  ".hme-chat-markdown .hljs-attr,.hme-chat-markdown .hljs-attribute,.hme-chat-markdown .hljs-property{color:var(--hme-syntax-attr)}",
 ].join("\n");
 
 const safeUrl = (raw: string): string | null => {
@@ -77,6 +89,15 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
 
   while (i < source.length) {
     const c = source[i];
+    if (c === "\" && source[i + 1] === "(") {
+      const close = source.indexOf("\)", i + 2);
+      if (close > i + 2) {
+        const latex = source.slice(i + 2, close);
+        emit(opts.renderMath ? opts.renderMath(latex, false) : renderBuiltInMath(latex, false));
+        i = close + 2;
+        continue;
+      }
+    }
     if (c === "\\" && i + 1 < source.length && /[\\!#$%&'()*+,\-./:;<=>?@[\]^_\x60{|}~]/.test(source[i + 1])) {
       plain += source[i + 1];
       i += 2;
@@ -135,7 +156,7 @@ function inline(source: string, opts: RenderOptions, depth = 0): React.ReactNode
       const end = source.indexOf("$", i + 1);
       if (end > i + 1 && source[end - 1] !== "\\") {
         const math = source.slice(i + 1, end);
-        emit(opts.renderMath ? opts.renderMath(math, false) : <span className="hme-math-inline" title="LaTeX source">{math}</span>);
+        emit(opts.renderMath ? opts.renderMath(math, false) : renderBuiltInMath(math, false));
         i = end + 1;
         continue;
       }
@@ -213,7 +234,7 @@ function CodePanel({ code, language, highlightCode }: {
     <div className="hme-code-header"><span className="hme-language">{language || "text"}</span>
       <button className="hme-code-copy" type="button" onClick={copy} aria-label="Copy code">{copied ? "Copied" : "Copy code"}</button>
     </div>
-    <pre><code>{highlightCode ? highlightCode(code, language) : code}</code></pre>
+    <pre><code>{highlightCode ? highlightCode(code, language) : renderBuiltInHighlight(code, language)}</code></pre>
   </div>;
 }
 
@@ -265,7 +286,7 @@ function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
   let i = 0;
   const add = (node: React.ReactNode) => nodes.push(<React.Fragment key={nodes.length}>{node}</React.Fragment>);
   const special = (text: string): boolean =>
-    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith("$$"));
+    Boolean(heading.test(text) || fence.test(text) || quote.test(text) || horizontalRule.test(text) || listItem.test(text) || text.trim().startsWith("$") || text.trim().startsWith("\\["));
   while (i < lines.length) {
     const current = lines[i];
     if (!current.trim()) { i++; continue; }
@@ -282,22 +303,26 @@ function renderBlocks(lines: string[], opts: RenderOptions): React.ReactNode[] {
       add(<CodePanel code={source.join("\n")} language={language} highlightCode={opts.highlightCode} />);
       continue;
     }
-    if (current.trim().startsWith("$$")) {
-      let latex = current.trim().slice(2);
-      if (latex.endsWith("$$") && latex.length > 2) {
-        latex = latex.slice(0, -2);
+    const mathStart = current.trim().startsWith("$$") ? "$$" : current.trim().startsWith("\[") ? "\[" : null;
+    if (mathStart) {
+      const mathEnd = mathStart === "$$" ? "$$" : "\]";
+      let latex = current.trim().slice(mathStart.length);
+      const closeOnOpeningLine = latex.indexOf(mathEnd);
+      if (closeOnOpeningLine >= 0) {
+        latex = latex.slice(0, closeOnOpeningLine);
         i++;
       } else {
         i++;
         const parts = [latex];
-        while (i < lines.length && !lines[i].includes("$$")) parts.push(lines[i++]);
+        while (i < lines.length && !lines[i].includes(mathEnd)) parts.push(lines[i++]);
         if (i < lines.length) {
-          parts.push(lines[i].slice(0, lines[i].indexOf("$$")));
+          parts.push(lines[i].slice(0, lines[i].indexOf(mathEnd)));
           i++;
         }
         latex = parts.join("\n");
       }
-      add(<div className="hme-math-block">{opts.renderMath ? opts.renderMath(latex.trim(), true) : latex.trim()}</div>);
+      const content = latex.trim();
+      add(<div className="hme-math-block">{opts.renderMath ? opts.renderMath(content, true) : renderBuiltInMath(content, true)}</div>);
       continue;
     }
     const head = current.match(heading);
